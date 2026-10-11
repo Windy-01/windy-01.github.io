@@ -20,10 +20,16 @@
   border: 1px solid rgb(255 255 255 / 45%);
   border-radius: 20px;
   background-color: rgba(255, 255, 255, 0.269);
-  backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   box-shadow: 0 16px 40px rgb(15 23 42 / 12%);
   animation: layout-fade-in 0.8s ease-out 0.2s both;
+}
+
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  .layout-document-main {
+    background-color: rgb(255 255 255 / 72%);
+  }
 }
 
 :global(.dark-mode) .layout-document-main {
