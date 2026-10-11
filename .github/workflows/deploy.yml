@@ -38,6 +38,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Configure route fallback
+        run: cp dist/index.html dist/404.html
+
       - name: Verify static asset paths
         run: |
           if grep -Eq '((src|href)=")/assets/|href="/favicon' dist/index.html; then

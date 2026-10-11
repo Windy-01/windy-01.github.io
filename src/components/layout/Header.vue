@@ -17,14 +17,23 @@
       </div>
 
       <nav class="layout-header__buttons" aria-label="页面按钮">
-        <button
-          v-for="action in headerActions"
-          :key="action"
-          class="header-action"
-          type="button"
-        >
-          {{ action }}
-        </button>
+        <template v-for="action in headerActions" :key="action.label">
+          <RouterLink
+            v-if="action.to"
+            class="header-action"
+            :to="action.to"
+            @click="closeMenu"
+          >
+            {{ action.label }}
+          </RouterLink>
+          <button
+            v-else
+            class="header-action"
+            type="button"
+          >
+            {{ action.label }}
+          </button>
+        </template>
       </nav>
     </div>
   </header>
@@ -42,14 +51,23 @@
           aria-label="移动端二级菜单"
         >
           <nav class="layout-header__mobile-actions" aria-label="移动端页面按钮">
-            <button
-              v-for="action in headerActions"
-              :key="action"
-              class="header-action"
-              type="button"
-            >
-              {{ action }}
-            </button>
+            <template v-for="action in headerActions" :key="`${action.label}-mobile`">
+              <RouterLink
+                v-if="action.to"
+                class="header-action"
+                :to="action.to"
+                @click="closeMenu"
+              >
+                {{ action.label }}
+              </RouterLink>
+              <button
+                v-else
+                class="header-action"
+                type="button"
+              >
+                {{ action.label }}
+              </button>
+            </template>
           </nav>
         </aside>
       </div>
@@ -60,7 +78,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 
-const headerActions = ['button1', 'button2']
+const headerActions = [
+  { label: 'Document', to: '/document' },
+  { label: 'Button2' },
+]
 const isMenuOpen = ref(false)
 
 function closeMenu() {
@@ -135,6 +156,8 @@ onUnmounted(() => {
 
 .layout-header__buttons :deep(.header-action) {
   position: relative;
+  display: grid;
+  place-items: center;
   min-width: 136px;
   height: 64px;
   padding: 0 32px;
@@ -144,6 +167,9 @@ onUnmounted(() => {
   color: #334155;
   cursor: pointer;
   font: inherit;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
   transition:
     background 0.2s ease,
     box-shadow 0.2s ease,
@@ -155,9 +181,8 @@ onUnmounted(() => {
     ellipse at center,
     rgb(255 255 255 / 62%) 0%,
     rgb(255 255 255 / 28%) 42%,
-    transparent 78%
+    transparent 100%
   );
-  box-shadow: inset 0 0 18px rgb(255 255 255 / 36%);
   color: #0f172a;
 }
 
@@ -202,6 +227,9 @@ onUnmounted(() => {
 }
 
 .layout-header__mobile-actions :deep(.header-action) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   min-height: 52px;
   border: 0;
@@ -210,7 +238,9 @@ onUnmounted(() => {
   color: #334155;
   cursor: pointer;
   font: inherit;
-  text-align: left;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
 }
 
 .layout-header__mobile-actions :deep(.header-action:hover) {
@@ -245,9 +275,8 @@ onUnmounted(() => {
     ellipse at center,
     rgb(15 23 42 / 62%) 0%,
     rgb(15 23 42 / 28%) 42%,
-    transparent 78%
+    transparent 100%
   );
-  box-shadow: inset 0 0 18px rgb(15 23 42 / 36%);
   color: #f8fafc;
 }
 
