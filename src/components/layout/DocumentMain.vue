@@ -53,7 +53,7 @@
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .layout-document-main {
     padding: 24px 16px;
   }
