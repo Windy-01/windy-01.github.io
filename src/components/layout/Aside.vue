@@ -140,8 +140,8 @@ onUnmounted(() => {
   border: 1px solid rgb(255 255 255 / 45%);
   border-radius: 16px;
   background-color: rgb(255 255 255 / 42%);
-  backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   box-shadow: 0 16px 40px rgb(15 23 42 / 10%);
   transition:
     flex-basis 0.25s ease,
@@ -258,8 +258,8 @@ onUnmounted(() => {
   border: 1px solid rgb(255 255 255 / 55%);
   border-radius: 50%;
   background-color: rgb(255 255 255 / 72%);
-  backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   box-shadow: 0 8px 24px rgb(15 23 42 / 18%);
   color: #334155;
   cursor: pointer;

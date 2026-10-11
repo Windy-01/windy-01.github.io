@@ -99,8 +99,8 @@ onUnmounted(() => {
   width: 100%;
   margin-bottom: 24px;
   background-color: rgba(255, 255, 255, 0.312);
-  backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   animation: layout-fade-in 0.6s ease-out both;
 }
 
@@ -176,8 +176,8 @@ onUnmounted(() => {
   inset: 0;
   z-index: 100;
   background-color: rgb(15 23 42 / 38%);
-  backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
 }
 
 @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
