@@ -149,6 +149,12 @@ onUnmounted(() => {
   animation: layout-fade-in 0.7s ease-out 0.1s both;
 }
 
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  .layout-aside {
+    background-color: rgb(255 255 255 / 72%);
+  }
+}
+
 .layout-aside.is-collapsed {
   flex-basis: 64px;
   width: 64px;
@@ -296,11 +302,29 @@ onUnmounted(() => {
   transform: scale(1.08);
 }
 
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  .back-to-top,
+  .aside-popup-toggle {
+    background-color: rgb(255 255 255 / 90%);
+  }
+}
+
 :global(.dark-mode) .layout-aside {
   border-color: rgb(255 255 255 / 12%);
   background-color: rgb(15 23 42 / 42%);
   box-shadow: 0 16px 40px rgb(0 0 0 / 28%);
   color: #e2e8f0;
+}
+
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  :global(.dark-mode) .layout-aside {
+    background-color: rgb(15 23 42 / 88%);
+  }
+
+  :global(.dark-mode) .back-to-top,
+  :global(.dark-mode) .aside-popup-toggle {
+    background-color: rgb(15 23 42 / 92%);
+  }
 }
 
 :global(.dark-mode) .layout-aside__toggle {

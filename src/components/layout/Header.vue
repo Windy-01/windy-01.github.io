@@ -104,6 +104,12 @@ onUnmounted(() => {
   animation: layout-fade-in 0.6s ease-out both;
 }
 
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  .layout-header {
+    background-color: rgb(255 255 255 / 72%);
+  }
+}
+
 .layout-header__content {
   position: relative;
   display: flex;
@@ -174,6 +180,12 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(14px);
 }
 
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  .layout-header__menu-layer {
+    background-color: rgb(15 23 42 / 68%);
+  }
+}
+
 .layout-header__mobile-menu {
   width: min(280px, 82vw);
   height: 100vh;
@@ -207,6 +219,16 @@ onUnmounted(() => {
 
 :global(.dark-mode) .layout-header {
   background-color: rgb(15 23 42 / 31.2%);
+}
+
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  :global(.dark-mode) .layout-header {
+    background-color: rgb(15 23 42 / 88%);
+  }
+
+  :global(.dark-mode) .layout-header__menu-layer {
+    background-color: rgb(2 6 23 / 82%);
+  }
 }
 
 :global(.dark-mode) .layout-header__content {

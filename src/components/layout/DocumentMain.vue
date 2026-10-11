@@ -38,6 +38,12 @@
   box-shadow: 0 16px 40px rgb(0 0 0 / 28%);
 }
 
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  :global(.dark-mode) .layout-document-main {
+    background-color: rgb(15 23 42 / 88%);
+  }
+}
+
 .layout-document-main__content {
   width: min(100%);
   margin: 0 auto;
