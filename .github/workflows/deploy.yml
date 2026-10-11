@@ -43,11 +43,26 @@ jobs:
 
       - name: Verify static asset paths
         run: |
-          if grep -Eq '((src|href)=")/assets/|href="/favicon' dist/index.html; then
-            echo "Build contains root-relative asset paths, which break project GitHub Pages sites."
+          if grep -Eq '((src|href)="\./assets/|href="\./favicon)' dist/index.html; then
+            echo "Unexpected relative asset paths for GitHub Pages user site."
             cat dist/index.html
             exit 1
           fi
+
+          if grep -Eq '((src|href)="/assets/|href="/favicon)' dist/index.html; then
+            echo "Verified root-relative asset paths for GitHub Pages user site."
+          else
+            echo "Expected root-relative asset paths were not found."
+            cat dist/index.html
+            exit 1
+          fi
+      # - name: Verify static asset paths
+      #   run: |
+      #     if grep -Eq '((src|href)=")/assets/|href="/favicon' dist/index.html; then
+      #       echo "Build contains root-relative asset paths, which break project GitHub Pages sites."
+      #       cat dist/index.html
+      #       exit 1
+      #     fi
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
