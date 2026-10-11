@@ -390,12 +390,12 @@ onUnmounted(() => {
   }
 
   .aside-popup-toggle {
-    bottom: 8px;
+    bottom: 16px;
     display: grid;
   }
 
   .back-to-top {
-    bottom: 64px;
+    bottom: 80px;
   }
 }
 
