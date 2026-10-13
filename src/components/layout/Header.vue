@@ -107,6 +107,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 
 const headerActions = [
+  { label: 'Home', to: '/' },
   { label: 'Community', to: '/community' },
   { label: 'Document', to: '/document' },
   { label: 'Chat', to: '/Chat' },
