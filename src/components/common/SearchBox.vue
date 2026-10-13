@@ -53,6 +53,7 @@
       type="text"
       placeholder="Search"
       aria-label="Search"
+      @keydown="handleInputKeydown"
     >
 
     <button
@@ -88,11 +89,30 @@
         <path d="m20 20-4-4" />
       </svg>
     </button>
+
+    <div
+      v-if="isSuggestionOpen && suggestions.length > 0"
+      class="search-box__suggestions"
+      aria-label="搜索建议"
+    >
+      <button
+        v-for="(suggestion, index) in suggestions"
+        :key="suggestion"
+        class="search-box__suggestion"
+        :class="{ 'is-active': index === highlightedIndex }"
+        type="button"
+        @mousedown.prevent
+        @mouseenter="highlightedIndex = index"
+        @click="selectSuggestion(suggestion)"
+      >
+        {{ suggestion }}
+      </button>
+    </div>
   </form>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import {
   createSearchUrl,
@@ -101,10 +121,21 @@ import {
   searchEngines,
   type SearchEngineConfig,
 } from '../../config/searchEngines'
+import { fetchBaiduSuggestions } from '../../utils/baiduSuggest'
+
+// 输入变化后延迟请求，避免每敲一个字符都发一次建议请求。
+const suggestionDebounceMs = 150
 
 const searchQuery = ref('')
 const selectedEngine = ref<SearchEngineConfig>(defaultSearchEngine)
 const isEngineMenuOpen = ref(false)
+const suggestions = ref<string[]>([])
+const highlightedIndex = ref(-1)
+const isSuggestionOpen = ref(false)
+
+let suggestionTimer: number | undefined
+let suggestionRequestId = 0
+const suppressedSuggestionQuery = ref('')
 
 const activeEngine = computed(() => {
   const matchedEngine = resolveSearchEngine(searchQuery.value)
@@ -113,6 +144,99 @@ const activeEngine = computed(() => {
     ? selectedEngine.value
     : matchedEngine
 })
+
+watch(searchQuery, (value) => {
+  window.clearTimeout(suggestionTimer)
+
+  // 触发搜索时回填的关键词不需要再拉取建议。
+  if (value === suppressedSuggestionQuery.value) {
+    suppressedSuggestionQuery.value = ''
+    return
+  }
+
+  const suggestionQuery = getSuggestionQuery(value)
+
+  if (!suggestionQuery) {
+    closeSuggestions()
+    return
+  }
+
+  suggestionRequestId += 1
+  const requestId = suggestionRequestId
+
+  suggestionTimer = window.setTimeout(async () => {
+    const results = await fetchBaiduSuggestions(suggestionQuery)
+
+    if (requestId !== suggestionRequestId) {
+      return
+    }
+
+    suggestions.value = results
+    highlightedIndex.value = -1
+    isSuggestionOpen.value = results.length > 0
+  }, suggestionDebounceMs)
+})
+
+/** 去掉搜索引擎触发前缀（如 `!g `），建议词只针对真实搜索内容。 */
+function getSuggestionQuery(value: string) {
+  const trimmedValue = value.trim()
+
+  return trimmedValue.replace(resolveSearchEngine(trimmedValue).pattern, '').trim()
+}
+
+function closeSuggestions() {
+  window.clearTimeout(suggestionTimer)
+  isSuggestionOpen.value = false
+  highlightedIndex.value = -1
+  suggestions.value = []
+}
+
+function handleInputKeydown(event: KeyboardEvent) {
+  if (!isSuggestionOpen.value || suggestions.value.length === 0) {
+    return
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    highlightedIndex.value = (highlightedIndex.value + 1) % suggestions.value.length
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    highlightedIndex.value = highlightedIndex.value <= 0
+      ? suggestions.value.length - 1
+      : highlightedIndex.value - 1
+  } else if (event.key === 'Escape') {
+    closeSuggestions()
+  } else if (event.key === 'Enter' && highlightedIndex.value >= 0) {
+    event.preventDefault()
+    const selectedSuggestion = suggestions.value[highlightedIndex.value]
+
+    if (selectedSuggestion !== undefined) {
+      selectSuggestion(selectedSuggestion)
+    }
+  }
+}
+
+function selectSuggestion(suggestion: string) {
+  suppressedSuggestionQuery.value = suggestion
+  searchQuery.value = suggestion
+  submitSearch()
+}
+
+function handleDocumentClick(event: MouseEvent) {
+  if (!isSuggestionOpen.value) {
+    return
+  }
+
+  const target = event.target
+
+  if (!(target instanceof Element)) {
+    return
+  }
+
+  if (!target.closest('.search-box')) {
+    closeSuggestions()
+  }
+}
 
 function toggleEngineMenu() {
   isEngineMenuOpen.value = !isEngineMenuOpen.value
@@ -132,12 +256,23 @@ function clearSearch() {
 }
 
 function submitSearch() {
+  closeSuggestions()
+
   if (!searchQuery.value.trim()) {
     return
   }
 
   window.open(createSearchUrl(activeEngine.value, searchQuery.value), '_blank', 'noopener,noreferrer')
 }
+
+onMounted(() => {
+  document.addEventListener('click', handleDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleDocumentClick)
+  window.clearTimeout(suggestionTimer)
+})
 </script>
 
 <style scoped>
@@ -239,6 +374,76 @@ function submitSearch() {
   background-color: rgb(15 23 42 / 8%);
 }
 
+.search-box__suggestions {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  display: grid;
+  gap: 2px;
+  max-height: 304px;
+  padding: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid rgba(255, 255, 255, 0.263);
+  border-radius: 20px;
+  background-color: rgba(255, 255, 255, 0.037);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 10px 28px rgb(15 23 42 / 14%);
+  scrollbar-width: thin;
+  scrollbar-color: rgb(71 85 105 / 40%) transparent;
+}
+
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  .search-box__suggestions {
+    background-color: rgb(255 255 255 / 80%);
+  }
+}
+
+.search-box__suggestions::-webkit-scrollbar {
+  width: 8px;
+}
+
+.search-box__suggestions::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.search-box__suggestions::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-color: rgb(71 85 105 / 40%);
+  background-clip: content-box;
+}
+
+.search-box__suggestions::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(71 85 105 / 60%);
+  background-clip: content-box;
+}
+
+.search-box__suggestion {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-box__suggestion:hover,
+.search-box__suggestion.is-active {
+  background-color: rgb(15 23 42 / 8%);
+}
+
 .search-box__input {
   flex: 1;
   min-width: 0;
@@ -332,6 +537,38 @@ function submitSearch() {
 }
 
 :global(.layout-background.dark-mode .search-box__engine-option:hover) {
+  background-color: rgb(255 255 255 / 10%);
+}
+
+:global(.layout-background.dark-mode .search-box__suggestions) {
+  border-color: rgb(255 255 255 / 18%);
+  background-color: rgb(15 23 42 / 38%);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 24%);
+  scrollbar-color: rgb(148 163 184 / 45%) transparent;
+}
+
+@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+  :global(.layout-background.dark-mode .search-box__suggestions) {
+    background-color: rgb(15 23 42 / 88%);
+  }
+}
+
+:global(.layout-background.dark-mode .search-box__suggestions::-webkit-scrollbar-thumb) {
+  background-color: rgb(148 163 184 / 45%);
+  background-clip: content-box;
+}
+
+:global(.layout-background.dark-mode .search-box__suggestions::-webkit-scrollbar-thumb:hover) {
+  background-color: rgb(148 163 184 / 65%);
+  background-clip: content-box;
+}
+
+:global(.layout-background.dark-mode .search-box__suggestion) {
+  color: #fff;
+}
+
+:global(.layout-background.dark-mode .search-box__suggestion:hover),
+:global(.layout-background.dark-mode .search-box__suggestion.is-active) {
   background-color: rgb(255 255 255 / 10%);
 }
 
