@@ -37,7 +37,7 @@
           @pointerdown.prevent="startColumnDrag(1, $event)"
         />
 
-        <!-- 第三栏：展示 / 功能 / 输入（70%）。 -->
+        <!-- 第三栏：展示区 + 合并区（功能列表 + 输入，70%）。 -->
         <section ref="mainColRef" class="chat-col chat-col--main" :style="{ width: `${mainWidth}%` }">
           <div class="chat-pane chat-pane--display" :style="{ height: `${displayHeight}%` }">
             <!-- 占位内容：替换为消息展示区。 -->
@@ -53,21 +53,13 @@
             @pointerdown.prevent="startRowDrag(0, $event)"
           />
 
-          <div class="chat-pane chat-pane--function" :style="{ height: `${functionHeight}%` }">
-            <!-- 占位内容：替换为功能/工具栏。 -->
-            <p class="chat-placeholder">功能窗口</p>
+          <!-- 合并区：功能列表在上（固定 5% 高），输入窗口在下；两者之间不提供拖拽手柄。 -->
+          <div class="chat-compose__tools" :style="{ height: `${toolsHeight}%` }">
+            <!-- 占位内容：替换为功能列表。 -->
+            <p class="chat-placeholder">功能列表</p>
           </div>
 
-          <div
-            class="chat-splitter chat-splitter--row"
-            :style="{ top: `calc(${displayHeight + functionHeight}% - 4px)` }"
-            role="separator"
-            aria-orientation="horizontal"
-            aria-label="调整功能窗口高度"
-            @pointerdown.prevent="startRowDrag(1, $event)"
-          />
-
-          <div class="chat-pane chat-pane--input" :style="{ height: `${inputHeight}%` }">
+          <div class="chat-compose__input">
             <!-- 占位内容：替换为消息输入框。 -->
             <p class="chat-placeholder">输入窗口</p>
           </div>
@@ -99,15 +91,16 @@ const workspaceRef = ref<HTMLElement | null>(null)
 const mainColRef = ref<HTMLElement | null>(null)
 
 const columnWidths = ref<number[]>([5, 25, 70])
-const rowHeights = ref<number[]>([60, 20, 20])
+// 展示区高度（可拖拽调整）。下方合并区自动占满剩余高度。
+const displayHeight = ref(60)
+// 功能列表固定高度：占主列 5%。与输入窗口上下相邻、合并为一块区域，不可拖拽调整比例。
+const toolsHeight = 5
 
 const railWidth = computed(() => columnWidths.value[0] ?? 0)
 const sideWidth = computed(() => columnWidths.value[1] ?? 0)
 const mainWidth = computed(() => columnWidths.value[2] ?? 0)
 
-const displayHeight = computed(() => rowHeights.value[0] ?? 0)
-const functionHeight = computed(() => rowHeights.value[1] ?? 0)
-const inputHeight = computed(() => rowHeights.value[2] ?? 0)
+const composeHeight = computed(() => 100 - displayHeight.value)
 
 let dragState: DragState | null = null
 
@@ -122,7 +115,7 @@ function beginDrag(kind: DragKind, index: number, event: PointerEvent) {
     kind,
     index,
     startPosition: kind === 'column' ? event.clientX : event.clientY,
-    startSizes: [...(kind === 'column' ? columnWidths.value : rowHeights.value)],
+    startSizes: [...(kind === 'column' ? columnWidths.value : [displayHeight.value, composeHeight.value])],
     containerSize: kind === 'column' ? container.clientWidth : container.clientHeight,
   }
 
@@ -158,15 +151,17 @@ function handleDragMove(event: PointerEvent) {
 
   const minSize = state.kind === 'column' ? minColumnWidth : minRowHeight
   const total = first + second
-  const clampedFirst = Math.min(Math.max(first + delta, minSize), total - minSize)
-  const next = [...state.startSizes]
-  next[state.index] = clampedFirst
-  next[state.index + 1] = total - clampedFirst
+  // 纵向拖拽时，合并区还要放得下固定高度的功能列表，上界需再减去 toolsHeight。
+  const upperBound = state.kind === 'column' ? total - minSize : total - minSize - toolsHeight
+  const clampedFirst = Math.min(Math.max(first + delta, minSize), upperBound)
 
   if (state.kind === 'column') {
+    const next = [...state.startSizes]
+    next[state.index] = clampedFirst
+    next[state.index + 1] = total - clampedFirst
     columnWidths.value = next
   } else {
-    rowHeights.value = next
+    displayHeight.value = clampedFirst
   }
 }
 
@@ -307,11 +302,30 @@ onUnmounted(endDrag)
   background-color: rgb(255 255 255 / 26%);
 }
 
-.chat-pane--function {
+/* 合并区：功能列表（上，固定 5% 高）+ 输入窗口（下）。
+   同属一块区域，两者之间无拖拽手柄、无分隔线。 */
+.chat-compose__tools {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  min-height: 0;
+  padding: 4px 12px;
+  overflow: hidden;
   background-color: rgb(255 255 255 / 20%);
 }
 
-.chat-pane--input {
+.chat-compose__tools .chat-placeholder {
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
+.chat-compose__input {
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
   background-color: rgb(255 255 255 / 30%);
 }
 
@@ -393,11 +407,11 @@ onUnmounted(endDrag)
   background-color: rgb(15 23 42 / 20%);
 }
 
-:global(.dark-mode) .chat-pane--function {
+:global(.dark-mode) .chat-compose__tools {
   background-color: rgb(15 23 42 / 12%);
 }
 
-:global(.dark-mode) .chat-pane--input {
+:global(.dark-mode) .chat-compose__input {
   background-color: rgb(15 23 42 / 26%);
 }
 

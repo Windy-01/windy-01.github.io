@@ -22,7 +22,7 @@ const router = createRouter({
       component: Document,
     },
     {
-      path: '/Chat',
+      path: '/chat',
       component: Chat,
     },
     {

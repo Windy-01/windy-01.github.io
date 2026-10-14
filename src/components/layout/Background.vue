@@ -27,7 +27,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-const backgroundImageUrl = 'https://www.loliapi.com/acg/pc/'
+import { backgroundImageUrl } from '../../config/background'
+
 const isBackgroundLoaded = ref(false)
 
 function handleBackgroundLoad() {

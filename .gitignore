@@ -1,4 +1,5 @@
 # Logs
+.workbuddy-ai
 logs
 *.log
 npm-debug.log*

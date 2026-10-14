@@ -1,19 +1,14 @@
 <template>
   <DocumentMain class="home-document-main">
-    <!-- 翻页测试内容：可删除整个区域。 -->
-    <div class="page-test" aria-label="翻页测试内容">
-      <div v-for="column in testColumns" :key="column" class="page-test__column">
-        <span v-for="row in testRows" :key="`${column}-${row}`">1</span>
-      </div>
-    </div>
+    <!-- 文档内容来自 tmp/markdown-test.md，后续接入真实文档时替换数据源即可。 -->
+    <MarkdownView :source="markdownTestSource" aria-label="文档内容" />
   </DocumentMain>
 </template>
 
 <script setup lang="ts">
+import MarkdownView from '../components/common/MarkdownView.vue'
 import DocumentMain from '../components/layout/DocumentMain.vue'
-
-const testColumns = 4
-const testRows = 32
+import markdownTestSource from '../../tmp/markdown-test.md?raw'
 </script>
 
 <style scoped>
@@ -27,34 +22,6 @@ const testRows = 32
   .home-document-main {
     width: 100%;
     margin: 0;
-  }
-}
-
-:global(.dark-mode) .page-test {
-  color: #e2e8f0;
-}
-
-.page-test {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 24px;
-  min-height: 1200px;
-  color: #1e293b;
-  font-size: 1.25rem;
-  line-height: 2;
-  text-align: center;
-}
-
-.page-test__column {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-@media (max-width: 768px) {
-  .page-test {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
   }
 }
 </style>

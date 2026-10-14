@@ -110,7 +110,7 @@ const headerActions = [
   { label: 'Home', to: '/' },
   { label: 'Community', to: '/community' },
   { label: 'Document', to: '/document' },
-  { label: 'Chat', to: '/Chat' },
+  { label: 'Chat', to: '/chat' },
 ]
 const isMenuOpen = ref(false)
 
