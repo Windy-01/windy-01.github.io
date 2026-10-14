@@ -16,11 +16,17 @@
           @update:expanded="updateAsideExpanded"
           @toggle-popup="toggleAsidePopup"
           @toggle-dark-mode="toggleDarkMode"
+          @open-settings="openSettings"
+          @toggle-sticky-note="toggleStickyNote"
         />
       </div>
 
       <slot />
     </div>
+
+    <SettingsDialog :open="isSettingsOpen" @close="isSettingsOpen = false" />
+
+    <StickyNote :open="isStickyNoteOpen" />
   </Background>
 </template>
 
@@ -30,26 +36,28 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import Aside from './Aside.vue'
 import Background from './Background.vue'
 import Header from './Header.vue'
+import SettingsDialog from './SettingsDialog.vue'
+import StickyNote from '../common/StickyNote.vue'
+import { stickyNote } from '../../config/stickyNote'
 
 const themeStorageKey = 'windy-theme'
 const asideStorageKey = 'windy-aside-expanded'
 
+/** 桌面端侧栏默认收起；用户手动切换后由 localStorage 记住选择。 */
 function readAsideExpanded() {
+  // 移动端侧栏是浮层，展开态只用来决定是否显示文字，保持展开。
   if (window.innerWidth <= 768) {
     return true
   }
 
-  const savedAsideExpanded = window.localStorage.getItem(asideStorageKey)
-  const savedAsideCollapsed = window.localStorage.getItem('windy-aside-collapsed')
-
-  return savedAsideExpanded !== null
-    ? savedAsideExpanded === 'true'
-    : savedAsideCollapsed !== 'collapsed'
+  return window.localStorage.getItem(asideStorageKey) === 'true'
 }
 
 const isAsideExpanded = ref(readAsideExpanded())
 const isAsidePopupOpen = ref(false)
 const isDarkMode = ref(false)
+const isSettingsOpen = ref(false)
+const isStickyNoteOpen = ref(stickyNote.open)
 
 function updateAsideExpanded(expanded: boolean) {
   isAsideExpanded.value = expanded
@@ -82,6 +90,19 @@ function closeAsidePopupOnOutsideClick(event: MouseEvent) {
 function toggleDarkMode() {
   isDarkMode.value = !isDarkMode.value
   window.localStorage.setItem(themeStorageKey, isDarkMode.value ? 'dark' : 'light')
+}
+
+/** 侧栏「设置」入口，控制设置弹窗的显隐。 */
+function openSettings() {
+  isSettingsOpen.value = true
+  // 移动端侧栏是浮层，打开设置时顺手收起，避免关掉设置后还叠着一层。
+  isAsidePopupOpen.value = false
+}
+
+/** 侧栏「便签」入口，控制便签小窗的显隐。 */
+function toggleStickyNote() {
+  isStickyNoteOpen.value = !isStickyNoteOpen.value
+  isAsidePopupOpen.value = false
 }
 
 function keepAsideExpandedOnMobile() {

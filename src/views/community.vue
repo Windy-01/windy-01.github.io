@@ -23,8 +23,10 @@ import DocumentMain from '../components/layout/DocumentMain.vue'
 import { backgroundImageUrl } from '../config/background'
 
 // 帖子数据暂时硬编码，后续接入真实数据源时替换这里即可。
+// postId 供 PostCard 拉取浏览量/点赞/评论统计（接口当前固定返回 0）。
 const posts = [
   {
+    postId: 'markdown-test',
     title: 'Markdown 渲染测试',
     summary: '覆盖 h1–h6 标题、加粗斜体、行内代码与代码块、引用（含嵌套）、无序与有序列表、任务列表、表格、图片等全部文字样式的渲染用例。',
     author: 'Windy',

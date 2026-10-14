@@ -35,6 +35,30 @@
     </div>
 
     <div class="layout-aside__footer">
+      <div class="layout-aside__actions">
+        <button
+          class="aside-action"
+          type="button"
+          aria-label="便签"
+          title="便签"
+          @click="emit('toggle-sticky-note')"
+        >
+          <span aria-hidden="true">✎︎</span>
+          <span v-if="!collapsed">便签</span>
+        </button>
+
+        <button
+          class="aside-action"
+          type="button"
+          aria-label="设置"
+          title="设置"
+          @click="emit('open-settings')"
+        >
+          <span aria-hidden="true">⚙︎</span>
+          <span v-if="!collapsed">设置</span>
+        </button>
+      </div>
+
       <button
         class="theme-toggle"
         type="button"
@@ -90,6 +114,8 @@ const emit = defineEmits<{
   toggle: [value: boolean]
   'toggle-popup': []
   'toggle-dark-mode': []
+  'open-settings': []
+  'toggle-sticky-note': []
 }>()
 
 const collapsed = computed(() => !props.expanded)
@@ -192,6 +218,14 @@ onUnmounted(() => {
   margin-top: auto;
 }
 
+/* 侧栏动作区：与导航区一样左右各留 12px，hover 药丸才能和导航项对齐 */
+.layout-aside__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
 .side-navigation {
   display: flex;
   flex-direction: column;
@@ -199,7 +233,9 @@ onUnmounted(() => {
   padding: 8px 12px;
 }
 
-.side-navigation a {
+/* 导航项与设置按钮共用同一套外观，保证"与主页按钮一致" */
+.side-navigation a,
+.aside-action {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -211,13 +247,25 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.side-navigation a:hover {
+.side-navigation a:hover,
+.aside-action:hover {
   background-color: rgb(255 255 255 / 55%);
 }
 
-.side-navigation a span:first-child {
+.side-navigation a span:first-child,
+.aside-action span:first-child {
   flex: 0 0 16px;
   text-align: center;
+}
+
+/* 补齐 <button> 与 <a> 的默认差异 */
+.aside-action {
+  width: 100%;
+  border: 0;
+  background-color: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
 .theme-toggle {

@@ -9,7 +9,64 @@
 
         <p v-if="summary" class="post-card__summary">{{ summary }}</p>
 
-        <div v-if="tags.length > 0 || author || date" class="post-card__footer">
+        <div class="post-card__footer">
+          <!-- 统计三项：浏览量 / 点赞 / 评论，位于标签左侧，用 | 分隔。 -->
+          <div class="post-card__stats">
+            <span class="post-card__stat" title="浏览量">
+              <svg
+                class="post-card__stat-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span class="post-card__stat-value">{{ stats.views }}</span>
+            </span>
+
+            <span class="post-card__divider" aria-hidden="true">|</span>
+
+            <span class="post-card__stat" title="点赞数">
+              <svg
+                class="post-card__stat-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14Z" />
+                <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+              </svg>
+              <span class="post-card__stat-value">{{ stats.likes }}</span>
+            </span>
+
+            <span class="post-card__divider" aria-hidden="true">|</span>
+
+            <span class="post-card__stat" title="评论数">
+              <svg
+                class="post-card__stat-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" />
+              </svg>
+              <span class="post-card__stat-value">{{ stats.comments }}</span>
+            </span>
+          </div>
+
           <ul v-if="tags.length > 0" class="post-card__tags">
             <li v-for="tag in tags" :key="tag" class="post-card__tag">
               {{ tag }}
@@ -39,9 +96,11 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
+import { emptyPostStats, fetchPostStats, type PostStats } from '../../api/postStats'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   /** 帖子标题。 */
   title: string
   /** 点击后跳转的目标路由。 */
@@ -54,12 +113,26 @@ withDefaults(defineProps<{
   tags?: string[]
   /** 方形封面图地址，缺省时不渲染封面位。 */
   cover?: string
+  /** 帖子标识，用于拉取统计数据；缺省时统计保持为 0。 */
+  postId?: string
 }>(), {
   summary: '',
   author: '',
   date: '',
   tags: () => [],
   cover: '',
+  postId: '',
+})
+
+/** 统计三项，先给零值，挂载后再走接口刷新。 */
+const stats = ref<PostStats>(emptyPostStats())
+
+onMounted(async () => {
+  if (!props.postId) {
+    return
+  }
+
+  stats.value = await fetchPostStats(props.postId)
 })
 </script>
 
@@ -196,13 +269,44 @@ withDefaults(defineProps<{
   -webkit-line-clamp: 2;
 }
 
-/* 底部合并为一行：左侧标签，右侧作者与日期 */
+/* 底部合并为一行：左侧统计三项，中间标签，右侧作者与日期。
+   flex-wrap 是必需的：三个分组都不可压缩时，nowrap 会把卡片的最小宽度撑大，
+   在窄容器里把封面挤出可视区。允许换行后最小宽度只取决于最宽的那一项。 */
 .post-card__footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-top: 14px;
+}
+
+/* 统计三项固定不压缩，窄屏时优先让标签换行 */
+.post-card__stats {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--post-muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.post-card__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.post-card__stat-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+
+.post-card__stat-value {
+  font-variant-numeric: tabular-nums;
 }
 
 .post-card__tags {
@@ -262,6 +366,12 @@ withDefaults(defineProps<{
 @media (max-width: 640px) {
   .post-card {
     --post-cover-size: 88px;
+  }
+
+  /* 窄屏一行放不下统计 + 标签 + 作者日期，让统计独占一行，
+     第二行仍是左侧标签、右侧作者日期。 */
+  .post-card__stats {
+    flex: 1 0 100%;
   }
 }
 </style>
