@@ -6,7 +6,8 @@
     :status-is-error="hasError"
   >
     <p class="auth-note">
-      点击按钮会请求 <code>GET /logout</code>（无参数，只返回状态码）；成功后清除会话状态并回到首页。
+      点击按钮会带着当前的 <code>Authorization: Bearer</code> 令牌请求 <code>GET /logout</code>
+      （无参数，只返回状态码）；无论服务端结果如何，本地会话都会被清除，然后回到首页。
     </p>
 
     <form class="auth-form" novalidate @submit.prevent="handleSubmit">
@@ -41,7 +42,7 @@ async function handleSubmit() {
 
   try {
     await logout()
-    // 预留：接口接入后，退出成功应在这里跳转（例如回到首页）。
+    // 本地会话已由 `logout()` 清除，这里只负责回首页。
     await router.push({ name: 'home' })
   } catch (cause) {
     hasError.value = true

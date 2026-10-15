@@ -1,17 +1,19 @@
 /**
  * 外部接口通信层 —— 站内**唯一的网络出口**。
  *
- * 所有自有后端请求都必须经过这里，好处是三件事只在一处做：
+ * 所有自有后端请求都必须经过这里，好处是四件事只在一处做：
  * 1. 拼地址：统一以设置 → 网络里的「API Base URL」（`config.apiBaseUrl`）为前缀，
  *    由 `normalizeApiBaseUrl()` 规整；**留空或格式错误都回落到「与站点同源」的相对路径**；
- * 2. 编解码：请求体自动 JSON 序列化，响应体自动按 JSON 解析；
- * 3. 错误：非 2xx 与「请求根本没发出去」都统一转成 `ApiError`。
+ * 2. 鉴权：已登录时自动带上 `Authorization: Bearer <token>`（见 `./session.ts`）；
+ * 3. 编解码：请求体自动 JSON 序列化，响应体自动按 JSON 解析；
+ * 4. 错误：非 2xx 与「请求根本没发出去」都统一转成 `ApiError`。
  *
  * 业务模块（如 `./auth.ts`）只描述「请求哪个路径、带什么参数、返回什么类型」，
- * 不要自己调 `fetch`，也不要自己拼 base url。
+ * 不要自己调 `fetch`，也不要自己拼 base url、自己写 `Authorization`。
  */
 
 import { normalizeApiBaseUrl, useConfig } from '../config'
+import { getAuthorizationHeader } from './session'
 
 /**
  * 接口调用失败时抛出的错误。
@@ -42,6 +44,13 @@ export interface RequestOptions {
   query?: QueryParams
   /** 用于取消请求；被取消时原样抛出 `AbortError`，不包装成 `ApiError`。 */
   signal?: AbortSignal
+  /**
+   * 是否附带登录令牌。
+   *
+   * 默认 `true`：只要本地有会话就自动加上 `Authorization: Bearer <token>`；
+   * 公开接口（登录 / 注册等）显式传 `false`，避免带上过期的旧令牌。
+   */
+  auth?: boolean
 }
 
 /** 拼出最终请求地址：base url 无指定或格式错误时，回落到同源相对路径。 */
@@ -136,9 +145,17 @@ async function readBody(response: Response): Promise<unknown> {
  * - 请求没能发出（断网 / 服务未启动）：抛 `ApiError`，`status` 为 `0`。
  */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, query, signal } = options
+  const { method = 'GET', body, query, signal, auth = true } = options
   const headers: Record<string, string> = { Accept: 'application/json' }
   let payload: string | undefined
+
+  if (auth) {
+    const authorization = getAuthorizationHeader()
+
+    if (authorization !== null) {
+      headers.Authorization = authorization
+    }
+  }
 
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'

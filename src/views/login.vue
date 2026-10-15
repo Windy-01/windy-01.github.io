@@ -78,7 +78,7 @@ async function handleSubmit() {
   submitting.value = true
 
   try {
-    // 后端返回 { token, token_type }；令牌的保存（cookie / 请求头）留待会话层实现。
+    // 成功后令牌由会话层保存（`src/api/session.ts`），后续请求自动带 `Authorization: Bearer`。
     await login({ account: account.value.trim(), password: password.value })
     await router.push({ name: 'home' })
   } catch (cause) {
