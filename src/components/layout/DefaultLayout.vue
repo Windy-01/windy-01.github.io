@@ -8,9 +8,9 @@
     <Header />
 
     <div class="home-body">
-      <div class="aside-slot" :class="{ 'is-collapsed': !isAsideExpanded }">
+      <div class="aside-slot" :class="{ 'is-collapsed': !asideExpanded }">
         <Aside
-          :expanded="isAsideExpanded"
+          :expanded="asideExpanded"
           :popup-open="isAsidePopupOpen"
           :dark-mode="isDarkMode"
           @update:expanded="updateAsideExpanded"
@@ -31,7 +31,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import Aside from './Aside.vue'
 import Background from './Background.vue'
@@ -45,17 +45,29 @@ const { config } = useConfig()
 const themeStorageKey = 'windy-theme'
 const asideStorageKey = 'windy-aside-expanded'
 
+/** 断点必须与 `Aside.vue` 里的 `@media (max-width: 768px)` 保持一致。 */
+const mobileViewportQuery = '(max-width: 768px)'
+const mobileViewport = window.matchMedia(mobileViewportQuery)
+
 /** 桌面端侧栏默认收起；用户手动切换后由 localStorage 记住选择。 */
 function readAsideExpanded() {
-  // 移动端侧栏是浮层，展开态只用来决定是否显示文字，保持展开。
-  if (window.innerWidth <= 768) {
-    return true
-  }
-
   return window.localStorage.getItem(asideStorageKey) === 'true'
 }
 
+/** 用户自己的展开/收起偏好，只在用户点击侧栏按钮时变化。 */
 const isAsideExpanded = ref(readAsideExpanded())
+/** 当前是否处于移动端断点。 */
+const isMobileViewport = ref(mobileViewport.matches)
+
+/**
+ * 实际下发给侧栏的展开态。
+ *
+ * 移动端侧栏是浮层，收起后只剩图标、没有文字，所以浮层里恒为展开；
+ * 但这里**只做派生、不改写** `isAsideExpanded` —— 桌面端的偏好要原样保留，
+ * 这样从 PC 切到 mobile 再切回来，侧栏仍是用户自己选的那个状态。
+ */
+const asideExpanded = computed(() => isAsideExpanded.value || isMobileViewport.value)
+
 const isAsidePopupOpen = ref(false)
 const isDarkMode = ref(false)
 const isSettingsOpen = ref(false)
@@ -107,21 +119,20 @@ function toggleStickyNote() {
   isAsidePopupOpen.value = false
 }
 
-function keepAsideExpandedOnMobile() {
-  if (window.innerWidth <= 768) {
-    isAsideExpanded.value = true
-  }
+/** 断点变化时只同步「是否移动端」，不碰用户的展开偏好。 */
+function syncViewport(event: MediaQueryListEvent) {
+  isMobileViewport.value = event.matches
 }
 
 onMounted(() => {
   isDarkMode.value = window.localStorage.getItem(themeStorageKey) === 'dark'
   document.addEventListener('click', closeAsidePopupOnOutsideClick)
-  window.addEventListener('resize', keepAsideExpandedOnMobile)
+  mobileViewport.addEventListener('change', syncViewport)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', closeAsidePopupOnOutsideClick)
-  window.removeEventListener('resize', keepAsideExpandedOnMobile)
+  mobileViewport.removeEventListener('change', syncViewport)
 })
 </script>
 

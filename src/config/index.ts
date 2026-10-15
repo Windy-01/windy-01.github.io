@@ -216,3 +216,4 @@ export function useConfig() {
 
 export type { PersistedConfig, SearchEngineConfig, SiteConfig, StickyNoteConfig } from './types'
 export { createSearchUrl, resolveSearchEngine } from './search'
+export { isApiBaseUrlInvalid, normalizeApiBaseUrl } from './endpoint'

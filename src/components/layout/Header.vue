@@ -50,9 +50,17 @@
         </template>
       </nav>
 
-      <!-- 占位内容：头像与用户名后续替换为真实用户信息。 -->
-      <div class="layout-header__user">
-        <RouterLink class="header-user" to="/user/dev" aria-label="用户：user">
+      <!-- 用户区：dev 用户仍是占位身份（登录功能接入前一直展示它），
+           头像点开是入口菜单：个人主页 / 登录 / 注册 / 退出登录。 -->
+      <div ref="userAreaRef" class="layout-header__user">
+        <button
+          class="header-user"
+          type="button"
+          aria-haspopup="menu"
+          :aria-expanded="isUserMenuOpen"
+          aria-controls="header-user-menu"
+          @click="toggleUserMenu"
+        >
           <span class="header-user__avatar" aria-hidden="true">
             <svg viewBox="0 0 40 40" focusable="false">
               <circle cx="20" cy="20" r="20" fill="#cbd5e1" />
@@ -61,7 +69,28 @@
             </svg>
           </span>
           <span class="header-user__name">user</span>
-        </RouterLink>
+        </button>
+
+        <Transition name="header-user-menu">
+          <ul
+            v-if="isUserMenuOpen"
+            id="header-user-menu"
+            class="header-user-menu"
+            role="menu"
+            aria-label="用户菜单"
+          >
+            <li v-for="item in userMenuItems" :key="item.to" role="none">
+              <RouterLink
+                class="header-user-menu__item"
+                role="menuitem"
+                :to="item.to"
+                @click="closeUserMenu"
+              >
+                {{ item.label }}
+              </RouterLink>
+            </li>
+          </ul>
+        </Transition>
       </div>
     </div>
   </header>
@@ -111,8 +140,25 @@ const headerActions = [
   { label: 'Community', to: '/community' },
   { label: 'Document', to: '/document' },
   { label: 'Chat', to: '/chat' },
+  { label: 'About', to: '/about' },
 ]
+
+/**
+ * 用户菜单入口。
+ *
+ * `个人主页` 指向一直存在的 dev 占位用户；`登录 / 注册 / 退出登录` 是为后续
+ * 认证功能预留的入口，目前只有界面（见 `src/api/auth.ts`）。
+ */
+const userMenuItems = [
+  { label: '个人主页', to: '/user/dev' },
+  { label: '登录', to: '/login' },
+  { label: '注册', to: '/register' },
+  { label: '退出登录', to: '/logout' },
+]
+
 const isMenuOpen = ref(false)
+const isUserMenuOpen = ref(false)
+const userAreaRef = ref<HTMLElement | null>(null)
 
 function closeMenu() {
   isMenuOpen.value = false
@@ -120,11 +166,36 @@ function closeMenu() {
 
 function toggleMenu() {
   isMenuOpen.value = !isMenuOpen.value
+  closeUserMenu()
+}
+
+function closeUserMenu() {
+  isUserMenuOpen.value = false
+}
+
+function toggleUserMenu() {
+  isUserMenuOpen.value = !isUserMenuOpen.value
+}
+
+/** 点到用户区之外就收起菜单；点在按钮上时不收，交给 toggle 处理。 */
+function closeUserMenuOnOutsideClick(event: MouseEvent) {
+  if (!isUserMenuOpen.value) {
+    return
+  }
+
+  const target = event.target
+
+  if (target instanceof Node && userAreaRef.value?.contains(target)) {
+    return
+  }
+
+  closeUserMenu()
 }
 
 function handleKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     closeMenu()
+    closeUserMenu()
   }
 }
 
@@ -134,10 +205,12 @@ watch(isMenuOpen, (isOpen) => {
 
 onMounted(() => {
   document.addEventListener('keydown', handleKeydown)
+  document.addEventListener('click', closeUserMenuOnOutsideClick)
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener('click', closeUserMenuOnOutsideClick)
   document.body.style.overflow = ''
 })
 </script>
@@ -241,7 +314,16 @@ onUnmounted(() => {
   color: #0f172a;
 }
 
+/* 栏目增至 5 个后，按 136px 的最小宽度在中等视口会顶到品牌与用户区，这里收窄内边距。 */
+@media (max-width: 1060px) {
+  .layout-header__buttons :deep(.header-action) {
+    min-width: 0;
+    padding: 0 18px;
+  }
+}
+
 .layout-header__user {
+  position: relative;
   display: flex;
   align-items: center;
   margin-left: auto;
@@ -252,13 +334,59 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 6px 10px 6px 6px;
+  border: 0;
   border-radius: 999px;
+  background-color: transparent;
   color: #334155;
+  cursor: pointer;
+  font: inherit;
   font-weight: 700;
   text-decoration: none;
   transition:
     background-color 0.2s ease,
     color 0.2s ease;
+}
+
+/* 下拉菜单：与顶栏同一套毛玻璃质感 */
+.header-user-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 150px;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid rgb(15 23 42 / 10%);
+  border-radius: 12px;
+  background-color: rgb(255 255 255 / 92%);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 16px 32px rgb(15 23 42 / 18%);
+  list-style: none;
+}
+
+.header-user-menu__item {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.header-user-menu__item:hover {
+  background-color: rgb(15 23 42 / 8%);
+  color: #0f172a;
+}
+
+.header-user-menu__item:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
 }
 
 .header-user:hover {
@@ -418,6 +546,35 @@ onUnmounted(() => {
   background-color: rgb(255 255 255 / 10%);
 }
 
+/* 用户下拉菜单的暗色覆盖（注意完整选择器要写在括号里） */
+:global(.dark-mode .header-user-menu) {
+  border-color: rgb(255 255 255 / 12%);
+  background-color: rgb(15 23 42 / 94%);
+  box-shadow: 0 16px 32px rgb(0 0 0 / 38%);
+}
+
+:global(.dark-mode .header-user-menu__item) {
+  color: #cbd5e1;
+}
+
+:global(.dark-mode .header-user-menu__item:hover) {
+  background-color: rgb(255 255 255 / 10%);
+  color: #f8fafc;
+}
+
+.header-user-menu-enter-active,
+.header-user-menu-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.header-user-menu-enter-from,
+.header-user-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
 .header-menu-enter-active,
 .header-menu-leave-active {
   transition: opacity 0.25s ease;
@@ -453,7 +610,9 @@ onUnmounted(() => {
   .header-menu-enter-active,
   .header-menu-leave-active,
   .header-menu-enter-active .layout-header__mobile-menu,
-  .header-menu-leave-active .layout-header__mobile-menu {
+  .header-menu-leave-active .layout-header__mobile-menu,
+  .header-user-menu-enter-active,
+  .header-user-menu-leave-active {
     animation: none;
     transition: none;
   }

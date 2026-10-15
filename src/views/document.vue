@@ -1,27 +1,62 @@
 <template>
-  <DocumentMain class="home-document-main">
-    <!-- 文档内容来自 tmp/markdown-test.md，后续接入真实文档时替换数据源即可。 -->
-    <MarkdownView :source="markdownTestSource" aria-label="文档内容" />
-  </DocumentMain>
+  <DocumentReader
+    :source="document?.source ?? ''"
+    :loading="loading"
+    :error="error"
+    :aria-label="document?.title ?? '文档内容'"
+  />
 </template>
 
 <script setup lang="ts">
-import MarkdownView from '../components/common/MarkdownView.vue'
-import DocumentMain from '../components/layout/DocumentMain.vue'
-import markdownTestSource from '../../tmp/markdown-test.md?raw'
-</script>
+import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
-<style scoped>
-.home-document-main {
-  flex: 0 0 auto;
-  flex-shrink: 0;
-  margin: 0;
-}
+import DocumentReader from '../components/common/DocumentReader.vue'
+import { fetchDocument } from '../api/documents'
+import type { DocumentDetail } from '../api/documents'
 
-@media (max-width: 768px) {
-  .home-document-main {
-    width: 100%;
-    margin: 0;
+const route = useRoute()
+
+/** 文档 id 来自路由参数 `/document/:id`。 */
+const documentId = computed(() => String(route.params.id ?? ''))
+
+const document = ref<DocumentDetail | null>(null)
+const loading = ref(false)
+const error = ref('')
+
+/** 请求序号：只认最后一次发起的请求，避免快速切换 id 时旧响应覆盖新内容。 */
+let requestToken = 0
+
+async function loadDocument(id: string) {
+  const token = ++requestToken
+
+  loading.value = true
+  error.value = ''
+  document.value = null
+
+  try {
+    const detail = await fetchDocument(id)
+
+    if (token !== requestToken) {
+      return
+    }
+
+    document.value = detail
+  } catch (cause) {
+    if (token !== requestToken) {
+      return
+    }
+
+    error.value = cause instanceof Error ? cause.message : '文档加载失败。'
+  } finally {
+    if (token === requestToken) {
+      loading.value = false
+    }
   }
 }
-</style>
+
+// 从 /document/a 切到 /document/b 时组件实例会被复用，必须监听 id 变化。
+watch(documentId, (id) => {
+  void loadDocument(id)
+}, { immediate: true })
+</script>

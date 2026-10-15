@@ -1,0 +1,188 @@
+/**
+ * 外部接口通信层 —— 站内**唯一的网络出口**。
+ *
+ * 所有自有后端请求都必须经过这里，好处是三件事只在一处做：
+ * 1. 拼地址：统一以设置 → 网络里的「API Base URL」（`config.apiBaseUrl`）为前缀，
+ *    由 `normalizeApiBaseUrl()` 规整；**留空或格式错误都回落到「与站点同源」的相对路径**；
+ * 2. 编解码：请求体自动 JSON 序列化，响应体自动按 JSON 解析；
+ * 3. 错误：非 2xx 与「请求根本没发出去」都统一转成 `ApiError`。
+ *
+ * 业务模块（如 `./auth.ts`）只描述「请求哪个路径、带什么参数、返回什么类型」，
+ * 不要自己调 `fetch`，也不要自己拼 base url。
+ */
+
+import { normalizeApiBaseUrl, useConfig } from '../config'
+
+/**
+ * 接口调用失败时抛出的错误。
+ *
+ * 调用方可以直接读 `status` 区分情况，`message` 是一句可直接展示给用户的文案。
+ */
+export class ApiError extends Error {
+  /** HTTP 状态码；`0` 表示请求根本没发出去（断网 / 服务未启动 / 跨域被拦）。 */
+  readonly status: number
+  /** 服务端返回的原始响应体；能解析成 JSON 时是对象，否则是文本或 `null`。 */
+  readonly body: unknown
+
+  constructor(status: number, message: string, body: unknown = null) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.body = body
+  }
+}
+
+/** 查询参数；值为 `undefined` / `null` 的键会被跳过。 */
+export type QueryParams = Record<string, string | number | boolean | null | undefined>
+
+export interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  /** 请求体；传对象会自动 JSON 序列化并带上 `Content-Type`。 */
+  body?: unknown
+  query?: QueryParams
+  /** 用于取消请求；被取消时原样抛出 `AbortError`，不包装成 `ApiError`。 */
+  signal?: AbortSignal
+}
+
+/** 拼出最终请求地址：base url 无指定或格式错误时，回落到同源相对路径。 */
+function resolveUrl(path: string, query?: QueryParams): string {
+  const { config } = useConfig()
+  // `normalizeApiBaseUrl()` 对「留空 / 格式错误」统一返回空串，即与站点同源。
+  const base = normalizeApiBaseUrl(config.apiBaseUrl)
+  const suffix = path.startsWith('/') ? path : `/${path}`
+
+  let url = `${base}${suffix}`
+
+  if (query !== undefined) {
+    const search = new URLSearchParams()
+
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null) {
+        search.append(key, String(value))
+      }
+    }
+
+    const queryString = search.toString()
+
+    if (queryString !== '') {
+      url += `${url.includes('?') ? '&' : '?'}${queryString}`
+    }
+  }
+
+  return url
+}
+
+/** 从响应体里尽量抽出一句可读的错误信息；抽不到就返回空串。 */
+function extractMessage(body: unknown): string {
+  if (typeof body === 'string') {
+    const text = body.trim()
+
+    // 过长的文本、HTML 错误页都不适合直接展示给用户。
+    if (text === '' || text.length > 200 || text.startsWith('<')) {
+      return ''
+    }
+
+    return text
+  }
+
+  if (typeof body === 'object' && body !== null) {
+    const record = body as Record<string, unknown>
+    const detail = record.message ?? record.detail ?? record.error
+
+    if (typeof detail === 'string' && detail.trim() !== '') {
+      return detail.trim()
+    }
+  }
+
+  return ''
+}
+
+/** 拼一句可展示的错误文案：优先用响应体里的信息，其次状态文本，最后兜底。 */
+function readErrorMessage(status: number, statusText: string, body: unknown): string {
+  const fromBody = extractMessage(body)
+
+  if (fromBody !== '') {
+    return fromBody
+  }
+
+  // 注意：HTTP/2 下 `statusText` 通常为空串，这时走兜底文案。
+  return statusText.trim() !== '' ? statusText.trim() : `请求失败（HTTP ${status}）。`
+}
+
+/** 读响应体：204 或空响应返回 `undefined`，其余尽量按 JSON 解析。 */
+async function readBody(response: Response): Promise<unknown> {
+  if (response.status === 204) {
+    return undefined
+  }
+
+  const text = await response.text()
+
+  if (text.trim() === '') {
+    return undefined
+  }
+
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return text
+  }
+}
+
+/**
+ * 发起一次请求并返回解析后的响应体。
+ *
+ * - `2xx`：返回响应体；后端只返回状态码（空响应 / 204）时为 `undefined`。
+ * - 其它状态码：抛 `ApiError`，`status` 是 HTTP 状态码。
+ * - 请求没能发出（断网 / 服务未启动）：抛 `ApiError`，`status` 为 `0`。
+ */
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', body, query, signal } = options
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  let payload: string | undefined
+
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    payload = JSON.stringify(body)
+  }
+
+  let response: Response
+
+  try {
+    response = await fetch(resolveUrl(path, query), { method, headers, body: payload, signal })
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') {
+      throw cause
+    }
+
+    throw new ApiError(0, '无法连接到服务器，请检查网络或 API 地址。', null)
+  }
+
+  const responseBody = await readBody(response)
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      readErrorMessage(response.status, response.statusText, responseBody),
+      responseBody,
+    )
+  }
+
+  return responseBody as T
+}
+
+/** GET 请求，返回 JSON。 */
+export function getJson<T>(
+  path: string,
+  options: Omit<RequestOptions, 'method' | 'body'> = {},
+): Promise<T> {
+  return request<T>(path, { ...options, method: 'GET' })
+}
+
+/** POST 请求，`body` 会被 JSON 序列化。 */
+export function postJson<T>(
+  path: string,
+  body?: unknown,
+  options: Omit<RequestOptions, 'method' | 'body'> = {},
+): Promise<T> {
+  return request<T>(path, { ...options, method: 'POST', body })
+}

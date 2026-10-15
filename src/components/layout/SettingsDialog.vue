@@ -144,11 +144,13 @@
               </label>
 
               <p class="settings-hint">
-                站内所有自有后端接口都以此为前缀，后续接入的接口统一从这里取地址。
-                留空表示与站点同源，直接使用相对路径。
+                站内所有自有后端接口（登录 / 注册 / 退出登录等）都以此为前缀。
               </p>
-              <p class="settings-hint settings-hint--muted">
-                当前仅保存配置，还没有任何接口读取它。
+              <p
+                class="settings-hint"
+                :class="apiBaseUrlHintIsError ? 'settings-hint--error' : 'settings-hint--muted'"
+              >
+                {{ apiBaseUrlHint }}
               </p>
             </template>
 
@@ -195,7 +197,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 
-import { configCookieName, useConfig } from '../../config'
+import { configCookieName, isApiBaseUrlInvalid, useConfig } from '../../config'
 
 const props = defineProps<{
   /** 是否展示设置弹窗。 */
@@ -281,6 +283,22 @@ const isDirty = computed(() => {
 
     return saved === undefined || engine.name !== saved.name || engine.url !== saved.url
   })
+})
+
+/** 表单里填的 base url 是否格式不合法（留空不算错误）。 */
+const apiBaseUrlHintIsError = computed(() => isApiBaseUrlInvalid(form.apiBaseUrl))
+
+/** base url 字段下方的动态说明：告诉用户当前会走哪个地址。 */
+const apiBaseUrlHint = computed(() => {
+  if (apiBaseUrlHintIsError.value) {
+    return '地址格式不正确，将按「与站点同源」处理。请填写完整的 http:// 或 https:// 地址。'
+  }
+
+  if (form.apiBaseUrl.trim() === '') {
+    return '留空表示与站点同源，接口走相对路径。'
+  }
+
+  return '保存后，后端接口会请求到该地址。'
 })
 
 const statusText = computed(() => {
@@ -713,6 +731,12 @@ onBeforeUnmount(() => {
 .settings-hint--muted {
   margin-top: 6px;
   opacity: 0.8;
+}
+
+/* 填了但格式不合法：会回落到默认逻辑，用警示色提示 */
+.settings-hint--error {
+  margin-top: 6px;
+  color: var(--sd-danger);
 }
 
 .settings-engines {

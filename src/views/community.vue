@@ -37,7 +37,7 @@ const posts = computed(() => [
     author: 'Windy',
     date: '2026-10-14',
     tags: ['Markdown', 'Vue'],
-    to: '/document',
+    to: '/document/markdown-test',
     // 暂时复用站点背景图作为封面。
     cover: config.backgroundImageUrl,
   },

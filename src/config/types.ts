@@ -45,8 +45,9 @@ export interface SiteConfig {
   /**
    * 后端 API 的 base url。
    *
-   * 站内所有自有后端接口都以此为前缀；**留空表示与站点同源**，直接走相对路径。
-   * 目前仅作为配置项保存，尚未有任何接口读取它（见 `src/api/`）。
+   * 站内所有自有后端接口都以此为前缀；由通信层 `src/api/http.ts` 通过
+   * `normalizeApiBaseUrl()` 统一读取拼接，业务模块不要自己拼。
+   * **留空或格式错误都表示「无有效指定」**，此时回落到与站点同源的相对路径。
    */
   apiBaseUrl: string
   stickyNote: StickyNoteConfig
