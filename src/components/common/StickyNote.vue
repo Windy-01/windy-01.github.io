@@ -16,41 +16,179 @@
       @pointerup="endDrag"
       @pointercancel="endDrag"
     >
-      <span class="sticky-note__title">{{ config.title }}</span>
+      <span class="sticky-note__title">{{ config.stickyNote.title }}</span>
 
-      <button
-        class="sticky-note__button"
-        type="button"
-        :aria-label="minimized ? '展开便签' : '最小化便签'"
-        :title="minimized ? '展开' : '最小化'"
-        @click="toggleMinimized"
-      >
-        <span aria-hidden="true">{{ minimized ? '+' : '−' }}</span>
-      </button>
+      <div class="sticky-note__actions">
+        <!-- 编辑入口只在展开时出现，最小化态保持「便签 −」的紧凑样子。 -->
+        <button
+          v-if="!minimized"
+          class="sticky-note__button"
+          type="button"
+          :aria-label="isEditing ? '完成编辑' : '编辑便签'"
+          :aria-pressed="isEditing"
+          :title="isEditing ? '完成编辑' : '编辑'"
+          @click="toggleEditing"
+        >
+          <svg
+            v-if="isEditing"
+            class="sticky-note__icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          <svg
+            v-else
+            class="sticky-note__icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </button>
+
+        <button
+          class="sticky-note__button"
+          type="button"
+          :aria-label="minimized ? '展开便签' : '最小化便签'"
+          :title="minimized ? '展开' : '最小化'"
+          @click="toggleMinimized"
+        >
+          <span aria-hidden="true">{{ minimized ? '+' : '−' }}</span>
+        </button>
+      </div>
     </header>
 
     <div v-show="!minimized" class="sticky-note__body">
-      <!-- 内容暂时只做展示：正文来自 config，改动不落盘。 -->
-      <div class="sticky-note__content" v-html="html" />
+      <!-- 编辑态：直接编辑任务列表的 Markdown 源文本 -->
+      <textarea
+        v-if="isEditing"
+        ref="editorRef"
+        v-model="content"
+        class="sticky-note__editor"
+        aria-label="便签内容（Markdown 任务列表）"
+        placeholder="- [ ] 待办事项&#10;- [x] 已完成事项"
+        spellcheck="false"
+      />
+
+      <!-- 展示态：点左侧勾选框可直接切换完成状态（写回源文本） -->
+      <div
+        v-else
+        ref="contentRef"
+        class="sticky-note__content"
+        v-html="html"
+        @click="handleContentClick"
+      />
     </div>
+
+    <!-- 落盘失败时给个明确提示：内容还在页面上，但刷新会丢 -->
+    <p v-if="saveFailed && !minimized" class="sticky-note__error" role="status">
+      保存失败：Cookie 被禁用或内容超出容量，改动只保留在当前页面。
+    </p>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
-import { stickyNote as config } from '../../config/stickyNote'
+import { useConfig } from '../../config'
 import { renderMarkdown } from '../../utils/markdown'
 
-defineProps<{
+const props = defineProps<{
   /** 是否展示便签小窗。 */
   open: boolean
 }>()
 
+const { config, saveConfig } = useConfig()
+
 const noteRef = ref<HTMLElement | null>(null)
 const barRef = ref<HTMLElement | null>(null)
+const contentRef = ref<HTMLElement | null>(null)
+const editorRef = ref<HTMLTextAreaElement | null>(null)
 const minimized = ref(false)
+const isEditing = ref(false)
 const dragging = ref(false)
+
+/**
+ * 便签正文。初始值来自 cookie（没有则用 `src/config` 的默认值），
+ * 编辑后防抖写回 cookie。
+ */
+const content = ref(config.stickyNote.content)
+
+/** 写 cookie 失败（被禁用或内容超长）时提示；此时内容仍留在当前页面。 */
+const saveFailed = ref(false)
+
+/** 输入停顿多久后落盘，避免每敲一个字就写一次 cookie。 */
+const saveDebounceMs = 400
+let saveTimer: number | undefined
+
+/** 立刻把当前正文写进 cookie。 */
+function persistContent() {
+  window.clearTimeout(saveTimer)
+  saveTimer = undefined
+  saveFailed.value = !saveConfig({ stickyNoteContent: content.value })
+}
+
+/** 防抖落盘：编辑过程中不写，停顿后再写。 */
+function schedulePersist() {
+  saveFailed.value = false
+  window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(persistContent, saveDebounceMs)
+}
+
+/** 便签关闭 / 组件卸载前，把还没落盘的改动补写一次。 */
+function flushPendingSave() {
+  if (saveTimer !== undefined) {
+    persistContent()
+  }
+}
+
+// 正文变化就排一次落盘。
+// 与配置里已有的值相同说明这次变化来自外部同步（比如设置面板「恢复默认」），
+// 不需要再回写一遍，否则会把刚清掉的 cookie 又写回来。
+watch(content, (value) => {
+  if (value === config.stickyNote.content) {
+    return
+  }
+
+  schedulePersist()
+})
+
+// 外部改动（恢复默认）会把配置重置，这里跟随同步。
+watch(
+  () => config.stickyNote.content,
+  (value) => {
+    if (value === content.value) {
+      return
+    }
+
+    window.clearTimeout(saveTimer)
+    saveTimer = undefined
+    content.value = value
+    saveFailed.value = false
+  },
+)
+
+// 关闭便签时补写，避免「刚改完就关掉」丢改动。
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) {
+      flushPendingSave()
+    }
+  },
+)
 
 /**
  * 统一用「距视口右边缘 / 上边缘的偏移」定位，不用 left。
@@ -66,13 +204,124 @@ let dragOrigin = {
   top: 0,
 }
 
-const html = computed(() => renderMarkdown(config.content))
+const html = computed(() => renderMarkdown(content.value))
+
+/**
+ * 解禁渲染出来的勾选框。
+ *
+ * marked 给任务列表生成的 checkbox 带 `disabled`，不点不动；这里去掉它，
+ * 点击事件由 `handleContentClick` 接管（状态以源文本为准，改完重新渲染）。
+ */
+function enableCheckboxes() {
+  const boxes = contentRef.value?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+
+  boxes?.forEach((box) => box.removeAttribute('disabled'))
+}
+
+// 渲染结果、展示/编辑模式、便签显隐三者任一变化后，都要重新解禁一次。
+// 便签默认关闭，首次打开时节点才挂上，所以要一并监听 open。
+watch(
+  [html, isEditing, () => props.open],
+  async () => {
+    if (isEditing.value) {
+      return
+    }
+
+    await nextTick()
+    enableCheckboxes()
+  },
+  { immediate: true, flush: 'post' },
+)
+
+/** 任务列表行的前缀：`- [ ]` / `* [x]` / `+ [X]` 等。 */
+const taskLinePattern = /^\s*[-*+]\s+\[[ xX]\]/
+const checkedTaskPattern = /^\s*[-*+]\s+\[[xX]\]/
+const fencePattern = /^\s*(?:```|~~~)/
+
+/**
+ * 切换第 index 个任务的完成状态。
+ *
+ * 逐行扫描而不是直接对全文跑正则：代码围栏（``` / ~~~）里的 `- [ ]`
+ * 不会被 marked 渲染成勾选框，必须跳过，否则序号会和渲染结果错位。
+ */
+function toggleTaskAt(source: string, index: number): string {
+  const lines = source.split('\n')
+  let seen = -1
+  let inFence = false
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? ''
+
+    if (fencePattern.test(line)) {
+      inFence = !inFence
+      continue
+    }
+
+    if (inFence || !taskLinePattern.test(line)) {
+      continue
+    }
+
+    seen += 1
+
+    if (seen !== index) {
+      continue
+    }
+
+    lines[i] = checkedTaskPattern.test(line)
+      ? line.replace(/^(\s*[-*+]\s+)\[[xX]\]/, '$1[ ]')
+      : line.replace(/^(\s*[-*+]\s+)\[ \]/, '$1[x]')
+
+    break
+  }
+
+  return lines.join('\n')
+}
+
+/** 点勾选框 = 切换对应任务；状态由源文本驱动，所以先拦掉浏览器自己的勾选。 */
+function handleContentClick(event: MouseEvent) {
+  const target = event.target
+
+  if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') {
+    return
+  }
+
+  event.preventDefault()
+
+  const boxes = contentRef.value?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+  const index = boxes === undefined ? -1 : Array.from(boxes).indexOf(target)
+
+  if (index < 0) {
+    return
+  }
+
+  content.value = toggleTaskAt(content.value, index)
+}
+
+/** 切换编辑态；进入编辑时聚焦并把光标放到末尾，方便接着写。 */
+async function toggleEditing() {
+  isEditing.value = !isEditing.value
+
+  if (!isEditing.value) {
+    return
+  }
+
+  await nextTick()
+
+  const editor = editorRef.value
+
+  if (!editor) {
+    return
+  }
+
+  editor.focus()
+  editor.setSelectionRange(editor.value.length, editor.value.length)
+}
 
 const noteStyle = computed<Record<string, string>>(() => {
-  const offset = position.value ?? config.offset
+  const offset = position.value ?? config.stickyNote.offset
 
   return {
-    '--sn-width': `${config.width}px`,
+    '--sn-width': `${config.stickyNote.width}px`,
     right: `${offset.right}px`,
     top: `${offset.top}px`,
   }
@@ -148,6 +397,12 @@ function endDrag(event: PointerEvent) {
 /** 最小化 / 还原：尺寸变化后重新夹一次，防止展开时越出左边界。 */
 async function toggleMinimized() {
   minimized.value = !minimized.value
+
+  // 最小化后正文不可见，编辑态一并退出，避免展开时莫名其妙还是输入框。
+  if (minimized.value) {
+    isEditing.value = false
+  }
+
   await nextTick()
 
   if (!position.value) {
@@ -178,6 +433,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  flushPendingSave()
 })
 </script>
 
@@ -196,6 +452,7 @@ onUnmounted(() => {
   --sn-text: #1e293b;
   --sn-muted: #64748b;
   --sn-accent: #2563eb;
+  --sn-danger: #dc2626;
   --sn-hover: rgb(15 23 42 / 10%);
 
   position: fixed;
@@ -235,6 +492,7 @@ onUnmounted(() => {
   --sn-text: #e2e8f0;
   --sn-muted: #94a3b8;
   --sn-accent: #7dd3fc;
+  --sn-danger: #fca5a5;
   --sn-hover: rgb(255 255 255 / 14%);
 }
 
@@ -291,6 +549,13 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
+.sticky-note__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
 .sticky-note__button {
   display: grid;
   flex: 0 0 auto;
@@ -312,10 +577,67 @@ onUnmounted(() => {
   background-color: var(--sn-hover);
 }
 
+.sticky-note__button:focus-visible {
+  outline: 2px solid var(--sn-accent);
+  outline-offset: 1px;
+}
+
+/* 编辑态：笔换成对勾，用强调色标出来 */
+.sticky-note__button[aria-pressed='true'] {
+  color: var(--sn-accent);
+}
+
+.sticky-note__icon {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
 .sticky-note__body {
   max-height: 40vh;
   padding: 10px 12px 12px;
   overflow-y: auto;
+}
+
+/* 编辑态：直接编辑任务列表的 Markdown 源文本 */
+.sticky-note__editor {
+  display: block;
+  width: 100%;
+  min-height: 168px;
+  max-height: 40vh;
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  color: var(--sn-text);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.7;
+  resize: none;
+}
+
+.sticky-note__editor:focus {
+  outline: none;
+}
+
+.sticky-note__editor::placeholder {
+  color: var(--sn-muted);
+}
+
+/* 内容为空时给一句提示，避免看起来像坏了 */
+.sticky-note__content:empty::before {
+  content: '暂无内容，点右上角 ✎ 开始编辑';
+  color: var(--sn-muted);
+}
+
+/* 落盘失败提示：固定在正文下方，不跟着正文滚动 */
+.sticky-note__error {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--sn-border);
+  color: var(--sn-danger);
+  font-size: 0.72rem;
+  line-height: 1.5;
 }
 
 /* 任务列表：勾选框 + 文本一行一条 */
@@ -339,6 +661,7 @@ onUnmounted(() => {
   height: 14px;
   margin: 3px 0 0;
   accent-color: var(--sn-accent);
+  cursor: pointer;
   text-decoration: none;
 }
 

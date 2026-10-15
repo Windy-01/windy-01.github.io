@@ -38,7 +38,9 @@ import Background from './Background.vue'
 import Header from './Header.vue'
 import SettingsDialog from './SettingsDialog.vue'
 import StickyNote from '../common/StickyNote.vue'
-import { stickyNote } from '../../config/stickyNote'
+import { useConfig } from '../../config'
+
+const { config } = useConfig()
 
 const themeStorageKey = 'windy-theme'
 const asideStorageKey = 'windy-aside-expanded'
@@ -57,7 +59,7 @@ const isAsideExpanded = ref(readAsideExpanded())
 const isAsidePopupOpen = ref(false)
 const isDarkMode = ref(false)
 const isSettingsOpen = ref(false)
-const isStickyNoteOpen = ref(stickyNote.open)
+const isStickyNoteOpen = ref(config.stickyNote.open)
 
 function updateAsideExpanded(expanded: boolean) {
   isAsideExpanded.value = expanded

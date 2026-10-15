@@ -1,4 +1,5 @@
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   width: 100%;
@@ -9,4 +10,63 @@ html, body {
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/*
+ * 全局滚动条样式。
+ *
+ * 这里是**唯一**的定义处 —— 组件内不要再单独写滚动条规则，
+ * 值取自搜索推荐栏（原 `.search-box__suggestions`），保持应用内观感一致。
+ *
+ * 作用域限定在 `.layout-background`（Background 根节点，页面内容都挂在它里面）
+ * 而不是 `html` / `*`：**页面自身的滚动条保持浏览器默认样式，不做任何改动**。
+ *
+ * 两套属性都要写，缺一不可：
+ * - `scrollbar-width` / `scrollbar-color` 是标准属性（Firefox 全支持，Chrome / Edge 121+）。
+ *   在开启了系统「浮层滚动条」的 Windows 上，真正生效的就是这两个；
+ * - `::-webkit-scrollbar-*` 是 WebKit / Blink 的写法，Safari 以及系统使用
+ *   经典滚动条时生效。
+ *
+ * ⚠️ 实测：Chrome 里 `scrollbar-color` **会继承**，而 `scrollbar-width` **不会**
+ * （写在 `html` 上，`body` 的计算值仍是 `auto`）。所以颜色写在根节点靠继承下发，
+ * 宽度必须用后代通配选择器铺到每个元素上。
+ */
+.layout-background {
+  --scrollbar-thumb: rgb(71 85 105 / 40%);
+  --scrollbar-thumb-hover: rgb(71 85 105 / 60%);
+
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 暗色：`.dark-mode` 就挂在这个根节点上，直接覆盖即可 */
+.layout-background.dark-mode {
+  --scrollbar-thumb: rgb(148 163 184 / 45%);
+  --scrollbar-thumb-hover: rgb(148 163 184 / 65%);
+
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.layout-background * {
+  scrollbar-width: thin;
+}
+
+.layout-background ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.layout-background ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.layout-background ::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-color: var(--scrollbar-thumb);
+  background-clip: content-box;
+}
+
+.layout-background ::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
 }

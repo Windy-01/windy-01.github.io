@@ -24,7 +24,7 @@
 
     <div v-if="isEngineMenuOpen" class="search-box__engine-menu">
       <button
-        v-for="engine in searchEngines"
+        v-for="engine in engineList"
         :key="engine.id"
         class="search-box__engine-option"
         type="button"
@@ -116,18 +116,23 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import {
   createSearchUrl,
-  defaultSearchEngine,
   resolveSearchEngine,
-  searchEngines,
+  useConfig,
   type SearchEngineConfig,
-} from '../../config/searchEngines'
+} from '../../config'
 import { fetchBaiduSuggestions } from '../../utils/baiduSuggest'
 
 // 输入变化后延迟请求，避免每敲一个字符都发一次建议请求。
 const suggestionDebounceMs = 150
 
+const { config, defaultEngine } = useConfig()
+
+/** 引擎列表来自运行时配置：cookie 无有效数据时即为默认值。 */
+const engineList = computed(() => config.searchEngines)
+
 const searchQuery = ref('')
-const selectedEngine = ref<SearchEngineConfig>(defaultSearchEngine)
+/** 菜单里手动选中的引擎 id；null 表示跟随默认引擎。 */
+const selectedEngineId = ref<string | null>(null)
 const isEngineMenuOpen = ref(false)
 const suggestions = ref<string[]>([])
 const highlightedIndex = ref(-1)
@@ -137,12 +142,24 @@ let suggestionTimer: number | undefined
 let suggestionRequestId = 0
 const suppressedSuggestionQuery = ref('')
 
-const activeEngine = computed(() => {
-  const matchedEngine = resolveSearchEngine(searchQuery.value)
+/** 只存 id，改设置后引擎对象会被替换，存对象会拿到过期数据。 */
+const selectedEngine = computed(() => {
+  if (selectedEngineId.value === null) {
+    return null
+  }
 
-  return matchedEngine === defaultSearchEngine && selectedEngine.value !== defaultSearchEngine
-    ? selectedEngine.value
-    : matchedEngine
+  return engineList.value.find((engine) => engine.id === selectedEngineId.value) ?? null
+})
+
+/**
+ * 实际使用的引擎：查询带 `!g ` 这类前缀时优先用前缀命中的引擎，
+ * 否则用手动选中的引擎，再否则用设置里的默认引擎。
+ */
+const activeEngine = computed<SearchEngineConfig>(() => {
+  const fallback = defaultEngine.value
+  const matchedEngine = resolveSearchEngine(searchQuery.value, engineList.value, fallback)
+
+  return matchedEngine === fallback ? (selectedEngine.value ?? fallback) : matchedEngine
 })
 
 watch(searchQuery, (value) => {
@@ -180,8 +197,9 @@ watch(searchQuery, (value) => {
 /** 去掉搜索引擎触发前缀（如 `!g `），建议词只针对真实搜索内容。 */
 function getSuggestionQuery(value: string) {
   const trimmedValue = value.trim()
+  const engine = resolveSearchEngine(trimmedValue, engineList.value, defaultEngine.value)
 
-  return trimmedValue.replace(resolveSearchEngine(trimmedValue).pattern, '').trim()
+  return trimmedValue.replace(engine.pattern, '').trim()
 }
 
 function closeSuggestions() {
@@ -243,7 +261,7 @@ function toggleEngineMenu() {
 }
 
 function selectEngine(engine: SearchEngineConfig) {
-  selectedEngine.value = engine
+  selectedEngineId.value = engine.id
   isEngineMenuOpen.value = false
 }
 
@@ -392,34 +410,13 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
   box-shadow: 0 10px 28px rgb(15 23 42 / 14%);
-  scrollbar-width: thin;
-  scrollbar-color: rgb(71 85 105 / 40%) transparent;
+  /* 滚动条样式统一在 src/styles/globals.css 里定义，这里不再单独写。 */
 }
 
 @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
   .search-box__suggestions {
     background-color: rgb(255 255 255 / 80%);
   }
-}
-
-.search-box__suggestions::-webkit-scrollbar {
-  width: 8px;
-}
-
-.search-box__suggestions::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.search-box__suggestions::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-color: rgb(71 85 105 / 40%);
-  background-clip: content-box;
-}
-
-.search-box__suggestions::-webkit-scrollbar-thumb:hover {
-  background-color: rgb(71 85 105 / 60%);
-  background-clip: content-box;
 }
 
 .search-box__suggestion {
@@ -544,23 +541,12 @@ onUnmounted(() => {
   border-color: rgb(255 255 255 / 18%);
   background-color: rgb(15 23 42 / 38%);
   box-shadow: 0 10px 28px rgb(0 0 0 / 24%);
-  scrollbar-color: rgb(148 163 184 / 45%) transparent;
 }
 
 @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
   :global(.layout-background.dark-mode .search-box__suggestions) {
     background-color: rgb(15 23 42 / 88%);
   }
-}
-
-:global(.layout-background.dark-mode .search-box__suggestions::-webkit-scrollbar-thumb) {
-  background-color: rgb(148 163 184 / 45%);
-  background-clip: content-box;
-}
-
-:global(.layout-background.dark-mode .search-box__suggestions::-webkit-scrollbar-thumb:hover) {
-  background-color: rgb(148 163 184 / 65%);
-  background-clip: content-box;
 }
 
 :global(.layout-background.dark-mode .search-box__suggestion) {

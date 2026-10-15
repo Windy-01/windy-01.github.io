@@ -4,7 +4,7 @@
       <img
         class="layout-background__image"
         :class="{ 'is-loaded': isBackgroundLoaded }"
-        :src="backgroundImageUrl"
+        :src="config.backgroundImageUrl"
         alt=""
         decoding="async"
         @load="handleBackgroundLoad"
@@ -27,7 +27,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-import { backgroundImageUrl } from '../../config/background'
+import { useConfig } from '../../config'
+
+// 背景图地址取自运行时配置：cookie 无有效数据时即默认值。
+const { config } = useConfig()
 
 const isBackgroundLoaded = ref(false)
 

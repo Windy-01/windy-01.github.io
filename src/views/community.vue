@@ -18,13 +18,18 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+
 import PostCard from '../components/common/PostCard.vue'
 import DocumentMain from '../components/layout/DocumentMain.vue'
-import { backgroundImageUrl } from '../config/background'
+import { useConfig } from '../config'
+
+// 背景图地址跟随运行时配置，改完设置无需刷新即可生效。
+const { config } = useConfig()
 
 // 帖子数据暂时硬编码，后续接入真实数据源时替换这里即可。
 // postId 供 PostCard 拉取浏览量/点赞/评论统计（接口当前固定返回 0）。
-const posts = [
+const posts = computed(() => [
   {
     postId: 'markdown-test',
     title: 'Markdown 渲染测试',
@@ -34,9 +39,9 @@ const posts = [
     tags: ['Markdown', 'Vue'],
     to: '/document',
     // 暂时复用站点背景图作为封面。
-    cover: backgroundImageUrl,
+    cover: config.backgroundImageUrl,
   },
-]
+])
 </script>
 
 <style scoped>
