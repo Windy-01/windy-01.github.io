@@ -77,18 +77,16 @@
             <template v-else-if="activeSection === 'search'">
               <h3 class="settings-group__title">搜索</h3>
 
-              <label class="settings-field">
-                <span class="settings-field__label">默认引擎</span>
-                <select v-model="form.defaultSearchEngineId" class="settings-field__input">
-                  <option
-                    v-for="engine in form.searchEngines"
-                    :key="engine.id"
-                    :value="engine.id"
-                  >
-                    {{ engine.name }}
-                  </option>
-                </select>
-              </label>
+              <!-- ⚠️ 这里不能用 <label> 包：label 会把点击转发给内部第一个可聚焦元素，
+                   和自定义下拉的开关逻辑打架。改成显式 id + aria-labelledby。 -->
+              <div class="settings-field">
+                <span id="settings-label-default-engine" class="settings-field__label">默认引擎</span>
+                <SelectBox
+                  v-model="form.defaultSearchEngineId"
+                  :options="engineOptions"
+                  labelledby="settings-label-default-engine"
+                />
+              </div>
 
               <ul class="settings-engines">
                 <li
@@ -154,6 +152,49 @@
               </p>
             </template>
 
+            <template v-else-if="activeSection === 'chat'">
+              <h3 class="settings-group__title">聊天</h3>
+
+              <!-- 同「搜索」栏目：label 会转发点击，换成显式 id + aria-labelledby。 -->
+              <div class="settings-field">
+                <span id="settings-label-chat-storage" class="settings-field__label">聊天记录存储方式</span>
+                <SelectBox
+                  v-model="form.chatStorage.mode"
+                  :options="chatStorageOptions"
+                  labelledby="settings-label-chat-storage"
+                />
+              </div>
+
+              <p class="settings-hint settings-hint--muted">{{ chatStorageModeHint }}</p>
+
+              <!-- 只有选了「本地磁盘」才需要指定位置 -->
+              <template v-if="form.chatStorage.mode === 'disk'">
+                <label class="settings-field settings-field--spaced">
+                  <span class="settings-field__label">磁盘存储位置</span>
+                  <input
+                    v-model="form.chatStorage.directory"
+                    class="settings-field__input"
+                    type="text"
+                    spellcheck="false"
+                    autocomplete="off"
+                    :placeholder="defaultChatStorageDirectory"
+                  >
+                </label>
+
+                <p class="settings-hint">
+                  用 Windows 的环境变量写法（<code class="settings-hint__code">%USERPROFILE%</code>
+                  指当前用户目录），整串可以直接粘进「运行」（Win+R）或资源管理器地址栏打开。
+                  若「文档」目录已被移到别的盘，把前半段换成实际位置即可。目前只考虑 Windows。
+                  留空则回落到默认位置
+                  <code class="settings-hint__code">{{ defaultChatStorageDirectory }}</code>。
+                </p>
+              </template>
+
+              <p class="settings-hint settings-hint--muted">
+                该配置目前只是占位：聊天记录的存储格式、读写时机与文件管理尚未实现。
+              </p>
+            </template>
+
             <!-- 占位栏目：只有入口，内容待补充。 -->
             <div v-else class="settings-placeholder">
               <span class="settings-placeholder__icon" aria-hidden="true">
@@ -197,7 +238,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 
-import { configCookieName, isApiBaseUrlInvalid, useConfig } from '../../config'
+import {
+  chatStorageModes,
+  configCookieName,
+  defaultChatStorage,
+  isApiBaseUrlInvalid,
+  useConfig,
+} from '../../config'
+import type { ChatStorageMode } from '../../config'
+import SelectBox from '../common/SelectBox.vue'
 
 const props = defineProps<{
   /** 是否展示设置弹窗。 */
@@ -232,6 +281,20 @@ const sections: SettingsSection[] = [
 
 const activeSection = ref<SettingsSectionId>('general')
 
+/** 存储方式的中文文案；顺序取自配置层的 `chatStorageModes`，不在这里另定一份顺序。 */
+const chatStorageModeLabels: Record<ChatStorageMode, string> = {
+  cache: '存储在浏览器中',
+  disk: '本地磁盘',
+}
+
+const chatStorageOptions = chatStorageModes.map((value) => ({
+  value,
+  label: chatStorageModeLabels[value],
+}))
+
+/** 磁盘存储位置的默认值，用作输入框占位符与「留空回落」说明。 */
+const defaultChatStorageDirectory = defaultChatStorage.directory
+
 const activeSectionMeta = computed(() => {
   return sections.find((section) => section.id === activeSection.value) ?? sections[0]!
 })
@@ -260,7 +323,16 @@ const form = reactive({
   defaultSearchEngineId: config.defaultSearchEngineId,
   searchEngines: config.searchEngines.map((engine) => ({ ...engine })),
   apiBaseUrl: config.apiBaseUrl,
+  chatStorage: {
+    mode: config.chatStorage.mode,
+    directory: config.chatStorage.directory,
+  },
 })
+
+/** 默认引擎下拉的选项，直接由表单里的引擎列表派生（改名后立刻跟着变）。 */
+const engineOptions = computed(() =>
+  form.searchEngines.map((engine) => ({ value: engine.id, label: engine.name })),
+)
 
 const saveFailed = ref(false)
 
@@ -275,6 +347,13 @@ const isDirty = computed(() => {
   }
 
   if (form.apiBaseUrl !== config.apiBaseUrl) {
+    return true
+  }
+
+  if (
+    form.chatStorage.mode !== config.chatStorage.mode
+    || form.chatStorage.directory !== config.chatStorage.directory
+  ) {
     return true
   }
 
@@ -301,6 +380,13 @@ const apiBaseUrlHint = computed(() => {
   return '保存后，后端接口会请求到该地址。'
 })
 
+/** 存储方式下方的动态说明：把两种方式的差别（备注）说清楚。 */
+const chatStorageModeHint = computed(() => {
+  return form.chatStorage.mode === 'disk'
+    ? '聊天文件存储在本地：聊天记录会写入本地磁盘，位置可在下方指定。'
+    : '不会在本地存储：只在浏览器里保留少量最近的聊天记录。'
+})
+
 const statusText = computed(() => {
   if (saveFailed.value) {
     return '保存失败：浏览器拒绝写入 Cookie（可能被禁用或数据超出容量）。'
@@ -321,6 +407,8 @@ function syncFormFromConfig() {
   form.defaultSearchEngineId = config.defaultSearchEngineId
   form.searchEngines = config.searchEngines.map((engine) => ({ ...engine }))
   form.apiBaseUrl = config.apiBaseUrl
+  form.chatStorage.mode = config.chatStorage.mode
+  form.chatStorage.directory = config.chatStorage.directory
   saveFailed.value = false
 }
 
@@ -330,6 +418,10 @@ function handleSave() {
     defaultSearchEngineId: form.defaultSearchEngineId,
     searchEngines: form.searchEngines.map((engine) => ({ ...engine })),
     apiBaseUrl: form.apiBaseUrl,
+    chatStorage: {
+      mode: form.chatStorage.mode,
+      directory: form.chatStorage.directory,
+    },
   })
 }
 
@@ -696,6 +788,11 @@ onBeforeUnmount(() => {
   margin-top: 10px;
 }
 
+/* 前面隔着一段说明文字时，相邻兄弟选择器不生效，单独给一点上间距 */
+.settings-field--spaced {
+  margin-top: 14px;
+}
+
 .settings-field__label {
   display: block;
   margin-bottom: 5px;
@@ -720,6 +817,12 @@ onBeforeUnmount(() => {
   outline: none;
 }
 
+/*
+ * 下拉框的样式不在这里 —— 原生 select 的展开列表是浏览器原生控件、改不了，
+ * 所以换成了 `components/common/SelectBox.vue` 的自定义 listbox。
+ * 那个组件通过 `--sb-*` 变量取这里的 `--sd-*` 配色，没有 --sd-* 时用自己的默认值。
+ */
+
 /* 字段下方的补充说明 */
 .settings-hint {
   margin: 10px 0 0;
@@ -737,6 +840,17 @@ onBeforeUnmount(() => {
 .settings-hint--error {
   margin-top: 6px;
   color: var(--sd-danger);
+}
+
+/* 说明文字里夹的路径 / 值，用等宽字体和浅底标出来 */
+.settings-hint__code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background-color: var(--sd-tag-bg);
+  color: var(--sd-accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.94em;
+  white-space: nowrap;
 }
 
 .settings-engines {

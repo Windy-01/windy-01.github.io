@@ -1,6 +1,9 @@
 import { computed, reactive, ref } from 'vue'
 
-import { createDefaultConfig, defaultSearchEngine } from './defaults'
+import { createDefaultConfig, defaultChatStorage, defaultSearchEngine } from './defaults'
+import { parseChatLayout } from './chatLayout'
+import { parseChatStorage } from './chatStorage'
+import { parseSearchHistory } from './chatSearch'
 import type { PersistedConfig, SearchEngineConfig, SiteConfig } from './types'
 import { readCookie, removeCookie, writeCookie } from '../utils/cookie'
 
@@ -35,6 +38,9 @@ interface StoredConfig {
   searchEngines?: Record<string, { name?: unknown, url?: unknown }>
   apiBaseUrl?: unknown
   stickyNoteContent?: unknown
+  chatLayout?: unknown
+  searchHistory?: unknown
+  chatStorage?: unknown
 }
 
 /** 只接受非空字符串；其余（undefined / 空串 / 非字符串）一律视为「无数据」。 */
@@ -76,6 +82,15 @@ function pickPersisted(source: SiteConfig): PersistedConfig {
     searchEngines: source.searchEngines,
     apiBaseUrl: source.apiBaseUrl,
     stickyNoteContent: source.stickyNote.content,
+    chatLayout: {
+      columnWidths: [...source.chatLayout.columnWidths],
+      displayHeight: source.chatLayout.displayHeight,
+    },
+    searchHistory: [...source.searchHistory],
+    chatStorage: {
+      mode: source.chatStorage.mode,
+      directory: source.chatStorage.directory,
+    },
   }
 }
 
@@ -93,6 +108,15 @@ function serializeConfig(source: PersistedConfig): string {
     searchEngines,
     apiBaseUrl: source.apiBaseUrl,
     stickyNoteContent: source.stickyNoteContent,
+    chatLayout: {
+      columnWidths: source.chatLayout.columnWidths,
+      displayHeight: source.chatLayout.displayHeight,
+    },
+    searchHistory: source.searchHistory,
+    chatStorage: {
+      mode: source.chatStorage.mode,
+      directory: source.chatStorage.directory,
+    },
   })
 }
 
@@ -132,6 +156,12 @@ function loadConfig(): SiteConfig {
       ...defaults.stickyNote,
       content: readNoteContent(stored.stickyNoteContent, defaults.stickyNote.content),
     },
+    // 分栏比例是用户拖出来的，读回时统一清洗 + 夹取，脏数据回落到默认布局。
+    chatLayout: parseChatLayout(stored.chatLayout, defaults.chatLayout),
+    // 搜索记录同样只保留「非空字符串 + 去重 + 截断」，脏数据整体回落成空列表。
+    searchHistory: parseSearchHistory(stored.searchHistory),
+    // 存储配置逐字段清洗：方式不在可选值里、位置为空串都只让对应字段回落。
+    chatStorage: parseChatStorage(stored.chatStorage, defaults.chatStorage),
   }
 }
 
@@ -179,6 +209,15 @@ export function saveConfig(next: Partial<PersistedConfig>): boolean {
   config.searchEngines = merged.searchEngines.map((engine) => ({ ...engine }))
   config.apiBaseUrl = merged.apiBaseUrl
   config.stickyNote.content = merged.stickyNoteContent
+  // 整体替换成一个新对象，方便组件用 `watch(() => config.chatLayout)` 感知变化。
+  config.chatLayout = {
+    columnWidths: [...merged.chatLayout.columnWidths],
+    displayHeight: merged.chatLayout.displayHeight,
+  }
+  // 同理整体替换，组件可以直接 watch 搜索记录。
+  config.searchHistory = parseSearchHistory(merged.searchHistory)
+  // 存储配置也整体替换成新对象，方便 watch；写入前统一清洗一次。
+  config.chatStorage = parseChatStorage(merged.chatStorage, defaultChatStorage)
 
   isUsingDefaults.value = isSameAsDefaults(config)
 
@@ -193,8 +232,11 @@ export function resetConfig(): void {
   config.defaultSearchEngineId = defaults.defaultSearchEngineId
   config.searchEngines = defaults.searchEngines
   config.apiBaseUrl = defaults.apiBaseUrl
-  // 便签正文也在 cookie 里，恢复默认时一并清空。
+  // 便签正文、聊天分栏比例、搜索记录与存储配置也在 cookie 里，恢复默认时一并重置。
   config.stickyNote = defaults.stickyNote
+  config.chatLayout = defaults.chatLayout
+  config.searchHistory = [...defaults.searchHistory]
+  config.chatStorage = { ...defaults.chatStorage }
 
   isUsingDefaults.value = true
 
@@ -214,6 +256,37 @@ export function useConfig() {
   }
 }
 
-export type { PersistedConfig, SearchEngineConfig, SiteConfig, StickyNoteConfig } from './types'
+export type {
+  ChatLayoutConfig,
+  ChatStorageConfig,
+  ChatStorageMode,
+  PersistedConfig,
+  SearchEngineConfig,
+  SiteConfig,
+  StickyNoteConfig,
+} from './types'
 export { createSearchUrl, resolveSearchEngine } from './search'
+export { defaultChatStorage } from './defaults'
 export { isApiBaseUrlInvalid, normalizeApiBaseUrl } from './endpoint'
+export {
+  buildColumnWidths,
+  chatDisplayHeightMax,
+  chatDisplayHeightMin,
+  chatRailWidth,
+  chatSideWidthMax,
+  chatSideWidthMin,
+  clampDisplayHeight,
+  clampSideWidth,
+} from './chatLayout'
+export {
+  chatSearchHistoryMax,
+  chatSearchTermMax,
+  normalizeSearchTerm,
+  parseSearchHistory,
+  pushSearchHistory,
+} from './chatSearch'
+export {
+  chatStorageDirectoryMax,
+  chatStorageModes,
+  parseChatStorage,
+} from './chatStorage'
