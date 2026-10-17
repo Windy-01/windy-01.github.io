@@ -14,7 +14,7 @@
  * 读取时逐字段校验，缺失 / 类型不对 / JSON 损坏 / 存储被禁用，一律视为「未登录」。
  */
 
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 /** `localStorage` 里的键名。 */
 const sessionStorageKey = 'windy-session'
@@ -28,6 +28,16 @@ export interface Session {
   token: string
   /** 鉴权方案，当前固定为 `Bearer`。 */
   tokenType: string
+  /**
+   * 登录时填写的账号（用户名或邮箱）。
+   *
+   * ⚠️ **临时字段**：用户资料接口（`GET /users/me`）尚未接入，界面拿不到服务端返回的
+   * 显示名 / 头像，只能靠这个本地记录的账号区分「当前登录的是哪个用户」。
+   * 接口接好后应以 `fetchCurrentUser()` 的结果为准，这里退化成次要信息。
+   *
+   * 老会话（没有这个字段）读回时是空串，界面回落到「已登录」占位，不会当成未登录。
+   */
+  account: string
 }
 
 /** 从 `localStorage` 读回会话；任何异常都当作「未登录」。 */
@@ -59,7 +69,12 @@ function readStoredSession(): Session | null {
       return null
     }
 
-    return { token, tokenType: normalizeTokenType(record.tokenType) }
+    return {
+      token,
+      tokenType: normalizeTokenType(record.tokenType),
+      // 账号只是「临时展示」用的附加信息：缺失 / 类型不对都回落空串，不影响登录态判断。
+      account: typeof record.account === 'string' ? record.account.trim() : '',
+    }
   } catch {
     return null
   }
@@ -81,9 +96,17 @@ function normalizeTokenType(value: unknown): string {
  */
 export const session = ref<Session | null>(readStoredSession())
 
-/** 是否已登录。 */
+/**
+ * 是否已登录（**响应式**）。
+ *
+ * 界面需要跟随登录状态变化（顶栏切换用户菜单、退出后回到未登录）时直接用它。
+ * 不要自己读 `localStorage` —— 那样不会跟着 `setSession()` / `clearSession()` 更新。
+ */
+export const loggedIn = computed(() => session.value !== null)
+
+/** 是否已登录（函数形式，等价于 `loggedIn.value`）。 */
 export function isLoggedIn(): boolean {
-  return session.value !== null
+  return loggedIn.value
 }
 
 /** 当前访问令牌；未登录时为 `null`。 */
@@ -111,9 +134,20 @@ export function getAuthorizationHeader(): string | null {
  *
  * 先更新内存（立即生效），再尝试写入 `localStorage`；写入失败（隐私模式 / 配额满）
  * 不影响本次会话可用，只是刷新后会回到未登录。
+ *
+ * `tokenType` / `account` 都可省略：`tokenType` 省略时回落 `Bearer`，
+ * `account` 省略时按空串存（界面回落到「已登录」占位）。
  */
-export function setSession(next: Session): void {
-  session.value = { token: next.token.trim(), tokenType: normalizeTokenType(next.tokenType) }
+export function setSession(next: {
+  token: string
+  tokenType?: string
+  account?: string
+}): void {
+  session.value = {
+    token: next.token.trim(),
+    tokenType: normalizeTokenType(next.tokenType),
+    account: typeof next.account === 'string' ? next.account.trim() : '',
+  }
 
   try {
     window.localStorage.setItem(sessionStorageKey, JSON.stringify(session.value))
@@ -131,4 +165,21 @@ export function clearSession(): void {
   } catch {
     // 同上：存储不可用时忽略。
   }
+}
+
+/**
+ * 跨标签页同步登录状态。
+ *
+ * `storage` 事件只在**其它**标签页写入 `localStorage` 时触发（当前页收不到自己的写入），
+ * 所以不会和 `setSession()` / `clearSession()` 互相覆盖。
+ * `event.key === null` 表示整份 `localStorage` 被清空，这种情况也要重新读一遍。
+ */
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== null && event.key !== sessionStorageKey) {
+      return
+    }
+
+    session.value = readStoredSession()
+  })
 }

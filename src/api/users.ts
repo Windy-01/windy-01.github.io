@@ -73,3 +73,43 @@ export async function fetchUserProfile(id: string): Promise<UserProfile> {
 
   return { id, ...profile }
 }
+
+/**
+ * 「当前登录用户」的保留 id。
+ *
+ * 顶栏的「个人主页」在**已登录时**指向 `/user/${currentUserId}`（未登录时指向本地占位用户），
+ * 由 `views/user.vue` 再解析成真实用户（见 `fetchCurrentUser()`）。
+ * 未登录时访问这个路由会被路由守卫送去登录页。
+ */
+export const currentUserId = 'me'
+
+/**
+ * 「当前登录用户」的精简资料（顶栏用户区用）。
+ *
+ * 与 `UserProfile` 分开：这是「我自己」的资料，来自带令牌的接口，
+ * 不需要主页正文之类重量级字段。
+ */
+export interface CurrentUser {
+  /** 用户 id，与路由 `/user/:id` 的参数一致。 */
+  id: string
+  /** 显示名。 */
+  name: string
+  /** 登录名（@handle）。 */
+  login: string
+  /** 头像地址；为空时使用内置占位头像。 */
+  avatar: string
+}
+
+/**
+ * 拉取「当前登录用户」的资料。
+ *
+ * 契约（**预留给后端，尚未接入**）：`GET /users/me`，带
+ * `Authorization: Bearer <token>`，返回 `CurrentUser`；令牌失效时返回 401
+ * （通信层会自动清掉本地会话，界面随之回到未登录）。
+ *
+ * ⚠️ 目前是**留空实现**：恒返回 `null`，所以顶栏只能显示「已登录」这类占位文案。
+ * 接入时把函数体换成 `getJson<CurrentUser>('/users/me')` 即可，调用方一行都不用改。
+ */
+export function fetchCurrentUser(): Promise<CurrentUser | null> {
+  return Promise.resolve(null)
+}

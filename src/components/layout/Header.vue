@@ -50,8 +50,8 @@
         </template>
       </nav>
 
-      <!-- 用户区：dev 用户仍是占位身份（登录功能接入前一直展示它），
-           头像点开是入口菜单：个人主页 / 登录 / 注册 / 退出登录。 -->
+      <!-- 用户区：登录状态由会话层（`src/api/session.ts`）里的令牌决定。
+           菜单项跟着登录态切换，但「个人主页」在登录前后都保留。 -->
       <div ref="userAreaRef" class="layout-header__user">
         <button
           class="header-user"
@@ -59,16 +59,25 @@
           aria-haspopup="menu"
           :aria-expanded="isUserMenuOpen"
           aria-controls="header-user-menu"
+          :title="userTitle"
           @click="toggleUserMenu"
         >
-          <span class="header-user__avatar" aria-hidden="true">
-            <svg viewBox="0 0 40 40" focusable="false">
+          <span class="header-user__avatar" :style="avatarStyle" aria-hidden="true">
+            <img
+              v-if="currentUser?.avatar"
+              :src="currentUser.avatar"
+              alt=""
+              decoding="async"
+            >
+            <!-- 资料接口没接入时，用账号首字母 + 派生色做临时头像，不同账号一眼能分开 -->
+            <span v-else-if="avatarInitial" class="header-user__initial">{{ avatarInitial }}</span>
+            <svg v-else viewBox="0 0 40 40" focusable="false">
               <circle cx="20" cy="20" r="20" fill="#cbd5e1" />
               <circle cx="20" cy="16" r="6.5" fill="#f8fafc" />
               <path d="M20 24c-6.63 0-12 5.37-12 12v4h24v-4c0-6.63-5.37-12-12-12z" fill="#f8fafc" />
             </svg>
           </span>
-          <span class="header-user__name">user</span>
+          <span class="header-user__name">{{ userDisplayName }}</span>
         </button>
 
         <Transition name="header-user-menu">
@@ -79,6 +88,15 @@
             role="menu"
             aria-label="用户菜单"
           >
+            <!-- 临时账号信息：资料接口接入后换成服务端的名字 / 头像 -->
+            <li
+              v-if="loggedIn && accountLabel !== ''"
+              class="header-user-menu__account"
+              role="none"
+            >
+              <span class="header-user-menu__account-name">{{ accountLabel }}</span>
+              <span class="header-user-menu__account-note">本地记录 · 资料接口未接入</span>
+            </li>
             <li v-for="item in userMenuItems" :key="item.to" role="none">
               <RouterLink
                 class="header-user-menu__item"
@@ -133,7 +151,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+
+import { loggedIn, session } from '../../api/session'
+import { currentUserId, fetchCurrentUser } from '../../api/users'
+import type { CurrentUser } from '../../api/users'
 
 const headerActions = [
   { label: 'Home', to: '/' },
@@ -143,18 +165,162 @@ const headerActions = [
   { label: 'About', to: '/about' },
 ]
 
+/** 未登录时「个人主页」指向的本地占位用户（仓库里目前唯一的用户）。 */
+const fallbackUserId = 'dev'
+
+/** 当前登录用户的资料；`fetchCurrentUser()` 尚未接入，暂时恒为 `null`。 */
+const currentUser = ref<CurrentUser | null>(null)
+
+/** 请求序号：登录态连续变化时只认最后一次的结果。 */
+let currentUserRequest = 0
+
+async function loadCurrentUser() {
+  const request = ++currentUserRequest
+
+  if (!loggedIn.value) {
+    currentUser.value = null
+    return
+  }
+
+  try {
+    const result = await fetchCurrentUser()
+
+    if (request === currentUserRequest) {
+      currentUser.value = result
+    }
+  } catch {
+    // 资料接口失败不该让顶栏不可用，退化成占位文案即可。
+    if (request === currentUserRequest) {
+      currentUser.value = null
+    }
+  }
+}
+
 /**
- * 用户菜单入口。
+ * 当前账号的完整值（登录时填的用户名或邮箱）。
  *
- * `个人主页` 指向一直存在的 dev 占位用户；`登录 / 注册 / 退出登录` 是为后续
- * 认证功能预留的入口，目前只有界面（见 `src/api/auth.ts`）。
+ * 资料接口 `GET /users/me` 还没接入，所以这就是眼下唯一能区分「登录的是谁」的信息。
+ * 老会话（`windy-session` 里没有 `account`）读回空串，界面退回「已登录」占位。
  */
-const userMenuItems = [
-  { label: '个人主页', to: '/user/dev' },
-  { label: '登录', to: '/login' },
-  { label: '注册', to: '/register' },
-  { label: '退出登录', to: '/logout' },
-]
+const accountLabel = computed(() => session.value?.account ?? '')
+
+/** 顶栏空间有限：邮箱只留 `@` 前面的部分，过长再截断。完整值见菜单与 `title`。 */
+function shortenAccount(account: string): string {
+  const at = account.indexOf('@')
+  const local = at > 0 ? account.slice(0, at) : account
+
+  return local.length > 14 ? `${local.slice(0, 13)}…` : local
+}
+
+/**
+ * 头像旁的文字。
+ *
+ * 优先级：服务端显示名 → 登录时填的账号 → 「已登录 / 未登录」占位。
+ * 前两级都有区分度，最后一级只会在老会话或资料缺失时出现。
+ */
+const userDisplayName = computed(() => {
+  const name = currentUser.value?.name.trim() ?? ''
+
+  if (name !== '') {
+    return name
+  }
+
+  if (accountLabel.value !== '') {
+    return shortenAccount(accountLabel.value)
+  }
+
+  return loggedIn.value ? '已登录' : '未登录'
+})
+
+/** 悬停提示：把「这是临时展示」明确说出来，免得被当成真实资料。 */
+const userTitle = computed(() => {
+  if (!loggedIn.value) {
+    return '未登录'
+  }
+
+  return accountLabel.value !== ''
+    ? `当前账号：${accountLabel.value}（临时显示，资料接口未接入）`
+    : '已登录（资料接口未接入）'
+})
+
+/**
+ * 由账号派生一个稳定色相（0–359）。
+ *
+ * 同一账号每次刷新颜色一致，不同账号颜色不同 —— 这是临时头像「有区分度」的来源。
+ */
+function hueOf(text: string): number {
+  let hash = 0
+
+  for (const char of text) {
+    hash = (hash * 31 + (char.codePointAt(0) ?? 0)) % 360
+  }
+
+  return hash
+}
+
+/** 临时头像上的首字母：邮箱取 `@` 前第一个字符，用户名直接取首个字符。 */
+const avatarInitial = computed(() => {
+  // 有真实头像时不用字母。
+  if ((currentUser.value?.avatar ?? '') !== '') {
+    return ''
+  }
+
+  const account = accountLabel.value
+
+  if (account === '') {
+    return ''
+  }
+
+  const at = account.indexOf('@')
+  const local = at > 0 ? account.slice(0, at) : account
+
+  return local.charAt(0).toUpperCase()
+})
+
+/** 临时头像的底色；有真实头像或拿不到账号时交给原有样式。 */
+const avatarStyle = computed(() => {
+  if ((currentUser.value?.avatar ?? '') !== '' || avatarInitial.value === '') {
+    return undefined
+  }
+
+  return {
+    backgroundColor: `hsl(${hueOf(accountLabel.value)}, 58%, 46%)`,
+    color: '#ffffff',
+  }
+})
+
+/**
+ * 「个人主页」的目标 —— **随登录态变化**。
+ *
+ * - 已登录：`/user/me`（保留 id，由页面自己解析成当前用户；解析不到时
+ *   那个路由渲染「还没有设置个人主页」状态）。
+ * - 未登录：`/user/dev`（仓库里的本地占位用户，登录前也保留这个入口）。
+ *
+ * 这里不直接拼 `currentUser.id` 是刻意的：资料是异步拉的，拼 id 会让链接
+ * 从 `/user/me` 抖成 `/user/xxx`；用保留 id 链接才是稳定的。
+ */
+const profilePath = computed(() => `/user/${loggedIn.value ? currentUserId : fallbackUserId}`)
+
+/**
+ * 用户菜单项 —— 完全由登录状态派生。
+ *
+ * - `个人主页`：**登录前后都保留**（未登录时指向本地占位用户）。
+ * - 未登录：`登录`。
+ * - 已登录：`退出登录`。
+ *
+ * `注册` 不再出现在菜单里，只保留在登录页底部的入口。
+ */
+const userMenuItems = computed(() => {
+  const items = [{ label: '个人主页', to: profilePath.value }]
+
+  items.push(
+    loggedIn.value
+      ? { label: '退出登录', to: '/logout' }
+      : { label: '登录', to: '/login' },
+  )
+
+  return items
+})
 
 const isMenuOpen = ref(false)
 const isUserMenuOpen = ref(false)
@@ -172,6 +338,18 @@ function toggleMenu() {
 function closeUserMenu() {
   isUserMenuOpen.value = false
 }
+
+/**
+ * 会话一变就收起菜单并重新拉取用户资料。
+ *
+ * 监听的是 `session` 本身而不是 `loggedIn`：登录 → 退出会变，但「已登录状态下
+ * 换个账号」（另一标签页重新登录、令牌被替换）时 `loggedIn` 仍是 `true` 不会触发，
+ * 只有盯着会话对象才能跟上。
+ */
+watch(() => session.value, () => {
+  closeUserMenu()
+  void loadCurrentUser()
+}, { immediate: true })
 
 function toggleUserMenu() {
   isUserMenuOpen.value = !isUserMenuOpen.value
@@ -354,7 +532,8 @@ onUnmounted(() => {
   right: 0;
   z-index: 20;
   display: grid;
-  min-width: 150px;
+  min-width: 180px;
+  max-width: 260px;
   margin: 0;
   padding: 6px;
   border: 1px solid rgb(15 23 42 / 10%);
@@ -364,6 +543,31 @@ onUnmounted(() => {
   backdrop-filter: blur(14px);
   box-shadow: 0 16px 32px rgb(15 23 42 / 18%);
   list-style: none;
+}
+
+/* 临时账号信息：菜单顶部的说明区，不是可点的菜单项 */
+.header-user-menu__account {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 4px;
+  padding: 6px 12px 10px;
+  border-bottom: 1px solid rgb(15 23 42 / 10%);
+}
+
+.header-user-menu__account-name {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-user-menu__account-note {
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.4;
 }
 
 .header-user-menu__item {
@@ -406,10 +610,26 @@ onUnmounted(() => {
   box-shadow: inset 0 0 0 1px rgb(15 23 42 / 10%);
 }
 
+.header-user__avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .header-user__avatar svg {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* 临时头像上的首字母：底色由账号派生，见脚本里的 avatarStyle */
+.header-user__initial {
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  user-select: none;
 }
 
 .header-user__name {
@@ -555,6 +775,18 @@ onUnmounted(() => {
 
 :global(.dark-mode .header-user-menu__item) {
   color: #cbd5e1;
+}
+
+:global(.dark-mode .header-user-menu__account) {
+  border-bottom-color: rgb(255 255 255 / 12%);
+}
+
+:global(.dark-mode .header-user-menu__account-name) {
+  color: #f8fafc;
+}
+
+:global(.dark-mode .header-user-menu__account-note) {
+  color: #94a3b8;
 }
 
 :global(.dark-mode .header-user-menu__item:hover) {

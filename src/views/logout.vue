@@ -2,12 +2,11 @@
   <AuthCard
     title="退出登录"
     hint="退出接口已按后端契约接好，服务端尚未就绪。"
-    :status="status"
-    :status-is-error="hasError"
   >
     <p class="auth-note">
       点击按钮会带着当前的 <code>Authorization: Bearer</code> 令牌请求 <code>GET /logout</code>
-      （无参数，只返回状态码）；无论服务端结果如何，本地会话都会被清除，然后回到首页。
+      （无参数，只返回状态码）。这里<strong>只尝试通知后端、不校验结果</strong>：无论服务端
+      返回成功还是失败，本地会话都会被清除，然后回到首页。
     </p>
 
     <form class="auth-form" novalidate @submit.prevent="handleSubmit">
@@ -31,22 +30,17 @@ import { logout } from '../api/auth'
 
 const router = useRouter()
 
-const status = ref('')
-const hasError = ref(false)
 const submitting = ref(false)
 
 async function handleSubmit() {
-  status.value = ''
-  hasError.value = false
   submitting.value = true
 
   try {
+    // 只尝试通知后端，不校验结果；本地会话在 `logout()` 里无条件清除。
     await logout()
-    // 本地会话已由 `logout()` 清除，这里只负责回首页。
     await router.push({ name: 'home' })
-  } catch (cause) {
-    hasError.value = true
-    status.value = cause instanceof Error ? cause.message : '退出登录失败，请稍后重试。'
+  } catch {
+    // 退出本身不会失败（后端结果已被 `logout()` 吞掉），这里只兜底导航异常。
   } finally {
     submitting.value = false
   }

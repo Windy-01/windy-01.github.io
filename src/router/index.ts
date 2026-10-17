@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { defaultDocumentId } from '../api/documents'
+import { isLoggedIn } from '../api/session'
+import { currentUserId } from '../api/users'
 import About from '../views/about.vue'
 import Chat from '../views/chat.vue'
 import Community from '../views/community.vue'
@@ -67,6 +69,26 @@ const router = createRouter({
       component: Logout,
     },
   ],
+})
+
+/**
+ * 需要登录态的两个入口：
+ *
+ * - `/logout`：未登录时点下去什么也不会发生，直接引导去登录页。
+ * - `/user/me`：「当前登录用户」的保留 id，未登录时没有可解析的对象。
+ *
+ * `/login` `/register` 不加限制：已经登录的人也可能想换个账号，不该被弹走。
+ */
+router.beforeEach((to) => {
+  if (to.name === 'logout' && !isLoggedIn()) {
+    return { name: 'login' }
+  }
+
+  if (to.name === 'user' && to.params.id === currentUserId && !isLoggedIn()) {
+    return { name: 'login' }
+  }
+
+  return true
 })
 
 export default router

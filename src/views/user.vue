@@ -92,11 +92,39 @@
         </header>
 
         <MarkdownView
+          v-if="profile.detail.trim() !== ''"
           class="user-page__readme"
           :source="profile.detail"
           :aria-label="`${profile.name} 的主页正文`"
         />
+        <!-- 用户存在但主页正文是空的：给一句占位，别留一块空白 -->
+        <p v-else class="user-page__readme-empty">
+          这个用户还没有设置主页内容。
+        </p>
       </section>
+    </div>
+
+    <!-- 已登录但还没有个人主页（`/user/me` 解析不到资料）：给明确的空状态，而不是错误页 -->
+    <div v-else-if="notSetUp" class="user-page-empty">
+      <div class="user-page-empty__avatar" aria-hidden="true">
+        <svg viewBox="0 0 40 40" focusable="false">
+          <circle cx="20" cy="20" r="20" fill="#cbd5e1" />
+          <circle cx="20" cy="16" r="6.5" fill="#f8fafc" />
+          <path d="M20 24c-6.63 0-12 5.37-12 12v4h24v-4c0-6.63-5.37-12-12-12z" fill="#f8fafc" />
+        </svg>
+      </div>
+
+      <h1 class="user-page-empty__title">还没有设置个人主页</h1>
+      <!-- 资料接口未接入，用登录时记录的账号告诉用户「现在是谁」 -->
+      <p v-if="currentAccount !== ''" class="user-page-empty__account">
+        当前账号：<strong>{{ currentAccount }}</strong>
+      </p>
+      <p class="user-page-empty__text">
+        这个账号还没有主页内容。设置功能尚未开放，之后可以在这里填写简介、链接和主页正文。
+      </p>
+      <RouterLink class="user-page-empty__action" :to="{ name: 'home' }">
+        返回首页
+      </RouterLink>
     </div>
   </DocumentMain>
 </template>
@@ -107,7 +135,8 @@ import { useRoute } from 'vue-router'
 
 import MarkdownView from '../components/common/MarkdownView.vue'
 import DocumentMain from '../components/layout/DocumentMain.vue'
-import { fetchUserProfile } from '../api/users'
+import { session } from '../api/session'
+import { currentUserId, fetchCurrentUser, fetchUserProfile } from '../api/users'
 import type { UserProfile } from '../api/users'
 
 /** 资料区里的小图标，用 feather 风格的描边路径。 */
@@ -137,6 +166,15 @@ const userId = computed(() => String(route.params.id ?? ''))
 const profile = ref<UserProfile | null>(null)
 const loading = ref(true)
 const error = ref('')
+/** 已登录但还没有个人主页（`/user/me` 解析不到资料）时的空状态。 */
+const notSetUp = ref(false)
+
+/**
+ * 当前登录账号（登录时填的用户名或邮箱）。
+ *
+ * 资料接口没接入，空状态里只能用它说明「现在登的是哪个账号」。
+ */
+const currentAccount = computed(() => session.value?.account ?? '')
 
 /**
  * 请求序号：从 `/user/a` 切到 `/user/b` 时组件实例会复用，
@@ -151,8 +189,39 @@ async function load() {
   loading.value = true
   error.value = ''
   profile.value = null
+  notSetUp.value = false
 
   try {
+    // `/user/me` 是「当前登录用户」的保留 id：先解析成真实用户，再拉资料。
+    if (id === currentUserId) {
+      const me = await fetchCurrentUser()
+
+      if (token !== requestToken) {
+        return
+      }
+
+      // 解析不到当前用户（资料接口留空 / 还没建个人主页）—— 走空状态，不算错误。
+      if (me === null) {
+        notSetUp.value = true
+        return
+      }
+
+      try {
+        const result = await fetchUserProfile(me.id)
+
+        if (token === requestToken) {
+          profile.value = result
+        }
+      } catch {
+        // 账号存在但还没有个人主页：对「我自己」来说这是空状态，不该显示报错。
+        if (token === requestToken) {
+          notSetUp.value = true
+        }
+      }
+
+      return
+    }
+
     const result = await fetchUserProfile(id)
 
     if (token !== requestToken) {
@@ -260,6 +329,95 @@ const metaItems = computed(() => {
 
 :global(.dark-mode .user-page__status--error) {
   color: #fca5a5;
+}
+
+/* ---------- 未设置主页的空状态 ---------- */
+
+.user-page-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 56px 24px;
+  text-align: center;
+}
+
+.user-page-empty__avatar {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  overflow: hidden;
+  border-radius: 50%;
+  background-color: var(--up-surface);
+  box-shadow: inset 0 0 0 1px var(--up-border);
+}
+
+.user-page-empty__avatar svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.user-page-empty__title {
+  margin: 4px 0 0;
+  color: var(--up-heading);
+  font-size: 1.3rem;
+  line-height: 1.3;
+}
+
+.user-page-empty__text {
+  max-width: 420px;
+  margin: 0;
+  color: var(--up-muted);
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+/* 临时账号标识：药丸形状，和「返回首页」按钮区分开 */
+.user-page-empty__account {
+  max-width: 100%;
+  margin: 0;
+  padding: 4px 14px;
+  border: 1px solid var(--up-border);
+  border-radius: 999px;
+  background-color: var(--up-surface);
+  color: var(--up-muted);
+  font-size: 0.8rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.user-page-empty__account strong {
+  color: var(--up-heading);
+  font-weight: 700;
+}
+
+.user-page-empty__action {
+  margin-top: 4px;
+  padding: 8px 18px;
+  border: 1px solid var(--up-border);
+  border-radius: 999px;
+  background-color: var(--up-button-bg);
+  color: var(--up-accent);
+  font-size: 0.86rem;
+  text-decoration: none;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.user-page-empty__action:hover {
+  border-color: var(--up-accent);
+}
+
+/* 主页正文为空时的占位 */
+.user-page__readme-empty {
+  margin: 0;
+  padding: 32px 0;
+  color: var(--up-muted);
+  font-size: 0.9rem;
+  text-align: center;
 }
 
 /* ---------- 两栏布局 ---------- */

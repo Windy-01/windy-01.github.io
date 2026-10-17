@@ -13,7 +13,8 @@
  * `./session.ts` 保存，之后由通信层 `./http.ts` 自动附到请求头上；退出登录时清掉。
  * 登录 / 注册是公开接口，显式不带令牌（`auth: false`）。
  *
- * 「只返回状态码」的两个接口成功时 resolve（无返回值），失败统一抛 `ApiError`。
+ * 「只返回状态码」的两个接口：`POST /register` 失败会抛 `ApiError`；
+ * `GET /logout` **只尝试通知后端、不校验结果**，永不抛错。
  * 拼地址 / JSON 编解码 / 错误包装都在 `./http.ts`，这里只描述业务契约。
  */
 
@@ -60,7 +61,8 @@ export async function login(payload: LoginPayload): Promise<LoginResult> {
     throw new Error('登录响应里没有可用的 token，无法保存登录状态。')
   }
 
-  setSession({ token, tokenType: result.token_type })
+  // 顺手把账号记进会话：用户资料接口还没接入，界面靠它区分「登录的是哪个用户」。
+  setSession({ token, tokenType: result.token_type, account: payload.account })
 
   return result
 }
@@ -80,14 +82,17 @@ export function register(payload: RegisterPayload): Promise<void> {
 /**
  * 退出登录。`GET`，无参数，后端只返回状态码。
  *
- * 请求会带上当前令牌；**无论后端成功与否，本地会话都会被清除** ——
- * 用户点「退出登录」的意图是明确的，不该因为网络问题而停留在登录态。
+ * **只尝试通知后端，不校验结果**：请求会带上当前令牌，但无论后端返回 2xx 还是 4xx，
+ * 甚至压根没连上，本地会话都会被清除，函数本身**不会抛错**。
  *
- * @throws 状态码非 2xx，或请求没能发出去（抛 `ApiError`）；本地会话此时已清除。
+ * 理由：用户点「退出登录」的意图很明确，本地必须先退出；服务端是否成功吊销令牌
+ * 不该阻塞这件事（最坏情况只是令牌在服务端多存活一会儿）。
  */
 export async function logout(): Promise<void> {
   try {
     await request<void>('/logout', { method: 'GET' })
+  } catch {
+    // 故意吞掉：结果不参与判断，见上方说明。
   } finally {
     clearSession()
   }

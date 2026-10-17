@@ -13,7 +13,7 @@
  */
 
 import { normalizeApiBaseUrl, useConfig } from '../config'
-import { getAuthorizationHeader } from './session'
+import { clearSession, getAuthorizationHeader } from './session'
 
 /**
  * 接口调用失败时抛出的错误。
@@ -177,6 +177,13 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const responseBody = await readBody(response)
 
   if (!response.ok) {
+    // 令牌失效：带鉴权的请求仍收到 401，说明本地令牌已经不可用（过期 / 被吊销），
+    // 直接清掉会话，界面随之回到未登录，避免顶栏一直显示「已登录」却什么也做不了。
+    // 登录 / 注册是 `auth: false`，它们返回 401（账号密码错误）时不会走到这里。
+    if (response.status === 401 && auth) {
+      clearSession()
+    }
+
     throw new ApiError(
       response.status,
       readErrorMessage(response.status, response.statusText, responseBody),
