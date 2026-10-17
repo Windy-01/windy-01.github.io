@@ -26,19 +26,31 @@
 
     <SettingsDialog :open="isSettingsOpen" @close="isSettingsOpen = false" />
 
-    <StickyNote :open="isStickyNoteOpen" />
+    <!-- 便签按需加载：见脚本里 `StickyNote` 的说明 -->
+    <StickyNote v-if="hasOpenedStickyNote" :open="isStickyNoteOpen" />
   </Background>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 
 import Aside from './Aside.vue'
 import Background from './Background.vue'
 import Header from './Header.vue'
 import SettingsDialog from './SettingsDialog.vue'
-import StickyNote from '../common/StickyNote.vue'
 import { useConfig } from '../../config'
+
+/**
+ * 便签小窗**按需加载**。
+ *
+ * 它依赖 `marked` + `dompurify`（打包后约 75 KB），而便签默认是关闭的 ——
+ * 没必要让每个页面的首屏都为它买单。改成动态 import 后这两个库会单独成 chunk，
+ * 只有点过「便签」才下载。
+ *
+ * ⚠️ 必须配合下面的 `v-if="hasOpenedStickyNote"`：只写 `defineAsyncComponent`
+ * 而让组件常驻渲染，Vue 会立刻加载它，等于没拆。
+ */
+const StickyNote = defineAsyncComponent(() => import('../common/StickyNote.vue'))
 
 const { config } = useConfig()
 
@@ -72,6 +84,15 @@ const isAsidePopupOpen = ref(false)
 const isDarkMode = ref(false)
 const isSettingsOpen = ref(false)
 const isStickyNoteOpen = ref(config.stickyNote.open)
+
+/**
+ * 便签是否**打开过**。
+ *
+ * 一旦打开过就常驻挂载（关闭只是把 `open` 置 false），拖拽位置、编辑态、
+ * 还没落盘的改动都留在组件里；只有「从没打开过」时才完全不加载它的代码。
+ * 初始值跟随配置：如果配置里便签默认是开着的，那就照旧立即挂载。
+ */
+const hasOpenedStickyNote = ref(isStickyNoteOpen.value)
 
 function updateAsideExpanded(expanded: boolean) {
   isAsideExpanded.value = expanded
@@ -116,6 +137,8 @@ function openSettings() {
 /** 侧栏「便签」入口，控制便签小窗的显隐。 */
 function toggleStickyNote() {
   isStickyNoteOpen.value = !isStickyNoteOpen.value
+  // 首次打开才真正加载组件；之后开合都复用同一份。
+  hasOpenedStickyNote.value = true
   isAsidePopupOpen.value = false
 }
 
