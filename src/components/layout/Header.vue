@@ -168,7 +168,7 @@ const headerActions = [
 /** 未登录时「个人主页」指向的本地占位用户（仓库里目前唯一的用户）。 */
 const fallbackUserId = 'dev'
 
-/** 当前登录用户的资料；`fetchCurrentUser()` 尚未接入，暂时恒为 `null`。 */
+/** 当前登录用户的资料（眼下由会话里的账号派生，见 `fetchCurrentUser()`）。 */
 const currentUser = ref<CurrentUser | null>(null)
 
 /** 请求序号：登录态连续变化时只认最后一次的结果。 */
@@ -204,25 +204,30 @@ async function loadCurrentUser() {
  */
 const accountLabel = computed(() => session.value?.account ?? '')
 
-/** 顶栏空间有限：邮箱只留 `@` 前面的部分，过长再截断。完整值见菜单与 `title`。 */
+/** 顶栏空间有限：超过 14 字符截断，完整值见菜单与 `title`。 */
+function truncate(text: string): string {
+  return text.length > 14 ? `${text.slice(0, 13)}…` : text
+}
+
+/** 顶栏空间有限：邮箱只留 `@` 前面的部分，过长再截断。 */
 function shortenAccount(account: string): string {
   const at = account.indexOf('@')
   const local = at > 0 ? account.slice(0, at) : account
 
-  return local.length > 14 ? `${local.slice(0, 13)}…` : local
+  return truncate(local)
 }
 
 /**
  * 头像旁的文字。
  *
- * 优先级：服务端显示名 → 登录时填的账号 → 「已登录 / 未登录」占位。
+ * 优先级：资料里的显示名 → 登录时填的账号 → 「已登录 / 未登录」占位。
  * 前两级都有区分度，最后一级只会在老会话或资料缺失时出现。
  */
 const userDisplayName = computed(() => {
   const name = currentUser.value?.name.trim() ?? ''
 
   if (name !== '') {
-    return name
+    return truncate(name)
   }
 
   if (accountLabel.value !== '') {
