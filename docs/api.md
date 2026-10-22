@@ -13,16 +13,21 @@
 | [认证](#认证)     | 3   | ✅ 已接入，真实发请求              |
 | [聊天](#聊天)     | 3   | ⏳ 只预留契约，当前返回本地演示数据 / 未接入 |
 | [文档](#文档)     | 1   | ⏳ 只预留契约，当前读本地静态 markdown |
-| [用户](#用户)     | 2   | ⏳ 只预留契约，当前读本地注册表 + 登录用户默认主页 |
+| [用户](#用户)     | 7   | 🚧 资料 / 头像 / README 已接 `/userinfo/*`，`/users/me` 仍本地兜底 |
 | [帖子统计](#帖子统计) | —   | ❓ 尚未约定路径                 |
 
 ## 网络层约定
 
 所有请求都必须经过 `src/api/http.ts`（站内唯一网络出口），业务模块**不要自己 `fetch`、不要自己拼 base url、不要自己写 `Authorization`**。
 
+> 唯一例外是 `src/api/fileRef.ts`：它要取**第三方存储的签名链接**，既不能拼 base url，也不能带鉴权头
+> （详见「文件字段的三种形态」）。除它之外没有第二处直接调 `fetch`。
+
 **地址**
 
 - 前缀取设置 → 网络里的「API Base URL」（`config.apiBaseUrl`），由 `normalizeApiBaseUrl()` 规整。
+- ⚠️ **下文所有路径都从资源段开始写，不带 `/api`**：`apiBaseUrl` 通常已经填成 `https://example.com/api`，
+  代码里再写一遍就成了 `/api/api/userinfo/...`。要改前缀只改配置，不动代码。
 - **留空或格式错误都回落到「与站点同源」的相对路径**。合法值必须是 `http:` / `https:` 绝对地址。
 - 查询参数用 `query` 选项传，值为 `undefined` / `null` 的键会被跳过。
 
@@ -37,10 +42,12 @@
 **编解码与错误**
 
 - 请求体传对象会自动 JSON 序列化并带上 `Content-Type: application/json`；响应体自动按 JSON 解析。
+- **文件上传统一走 `postForm()`**：请求体是 `FormData` 时**不设置** `Content-Type` —— multipart 的 `boundary` 必须由浏览器生成，手写会漏掉它，后端直接解析失败。
 - 非 2xx 与「请求根本没发出去」统一抛 `ApiError { status, body }`，`message` 可直接展示给用户。
 - `status === 0` 表示请求根本没发出去（断网 / 服务未启动 / 跨域被拦）。
 - 204 或空响应返回 `undefined`；请求被 `AbortSignal` 取消时原样抛 `AbortError`，不包装成 `ApiError`。
 - ⚠️ 错误文案提取会**过滤 HTML 错误页与超过 200 字符的长文本**。
+- ⚠️ `<img src>` 这类标签请求**不经过通信层**，拿不到 `Authorization`；头像地址由 `avatarUrlOf()` 单独拼（见「用户」一节）。
 
 ---
 
@@ -193,62 +200,209 @@
 
 ## 用户
 
-`src/api/users.ts` — ⏳ **只预留契约**，目前读本地注册表 + `tmp/` 下的静态 markdown；
-注册表里没有的**已登录用户**由 `createDefaultProfile()` 给一份空数据的默认主页
-（字段为空、关注数 0、正文为空并标注「空」），不会落到错误页。
+分成两层：
 
-> 主页上的「编辑」目前**只改前端内存**：不写 localStorage / Cookie，也不发请求，
-> 刷新即恢复。接入后端时需要补一个写接口（例如 `PUT /users/me`）。
+- `src/api/users.ts` —— **数据源入口**。对外只暴露 `fetchUserProfile(id)` / `fetchCurrentUser()`，组件不关心数据从哪来。
+- `src/userinfo.ts` —— `/userinfo/*` 这组接口的传输层，负责头像、README 与资料的读写。
 
-### `GET /users/:id`
+**三个资源各自独立**：资料（JSON）、头像（图片）、README（Markdown 文件）各有自己的读写接口，
+`update/profile` 的请求体里**不含** `avatar` 与 `detail` —— 它们体积大、更新频率也不同，塞进同一个 JSON 里没有好处。
 
-按 id 拉取用户公开资料。
+`fetchUserProfile(id)` 的回落顺序：**后端资料 → 本地注册表（`dev` 占位用户）→ 已登录用户的默认主页**。
+后端 404（该用户还没资料）和网络不通都会回落，不会变成错误页；只有「后端和注册表都没有」才算用户不存在。
+拿到资料后还会**单独再取一次 README**（取不到就当没有正文，不影响资料本身）。
+
+### 文件字段的三种形态（`src/api/fileRef.ts`）
+
+`avatar` 与 `detail` 都是「文件」，后端可能给三种形态，前端全部兼容：
+
+| 形态   | 例子                                                                                                            | 前端怎么用                     |
+| ---- | ------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| 内联   | `"# 标题\n\n正文"`                                                                                               | 直接就是内容，不再发请求              |
+| 普通地址 | `"https://cdn.example.com/avatar.png"`                                                                         | 直接交给 `<img src>`；正文则 `fetch` 回来 |
+| 签名链接 | `"http://127.0.0.1:9000/test/readme.txt?X-Amz-Algorithm=…&X-Amz-Signature=…"`                                  | 同上，但**有有效期**，且不能带鉴权头      |
+
+字段也可以是对象：前端先找地址字段（`url` / `fileUrl` / `downloadUrl` / `signedUrl` / `presignedUrl` / `href` / `link`），
+再找正文字段（`content` / `readme` / `detail` / `data`）。相对路径会按 `config.apiBaseUrl` 补全，绝对地址原样使用。
+
+> ⚠️ **签名链接走裸 `fetch`，不带 `Authorization`**：预签名 URL 的签名只覆盖 host，
+> 多带一个自定义头会触发 CORS 预检，而对象存储的 CORS 未必放行这个头 —— 请求会被浏览器直接拦掉。
+> 所以 `fileRef.ts` 是**唯一允许直接调 `fetch` 的模块**，不经过 `http.ts`（它要拼 base url、附鉴权头，两条都不适用）。
+>
+> ⚠️ 签名链接通常几十分钟就过期（例子是 `X-Amz-Expires=1800`），页面长时间停留后图片 / 正文可能失效，
+> 刷新即可。前端**不会**把签名链接持久化到 localStorage / cookie。
+
+**展示与下载是两条不同的路径**：
+
+- **展示**（`resolveImageSrc()`）：同步返回地址，交给 `<img src>`，让浏览器自己取 —— 省内存、能走缓存；
+- **下载**（`saveFileRefAs()`）：必须先 `fetch` 成 Blob 再触发保存 —— 跨域地址上的 `<a download>` 会被浏览器忽略，点下去只是导航打开。
+
+> 上传接口若在响应体里回了文件引用（图片地址 / 签名链接），前端会直接用它当新头像地址；
+> 只回状态码时（当前契约）才按 `avatarUrlOf()` 拼。
+
+> ⚠️ **路径里的 `avatar` 是按正确拼写写的**：需求原稿给的是 `avator`（少一个 `a`），经确认按拼写错误处理。
+> 若后端实际保留 `avator`，只改 `src/userinfo.ts` 顶部的路径常量，调用方一行不用动。
+
+### `GET /userinfo/:userid/profile`
+
+按 id 拉取用户资料。
 
 **路径参数**
 
-| 参数   | 说明                                                      |
-| ---- | ------------------------------------------------------- |
-| `id` | 用户 id，与前端路由 `/user/:id` 的参数一致，前端会做 `encodeURIComponent` |
+| 参数       | 说明                                                        |
+| -------- | --------------------------------------------------------- |
+| `userid` | 用户 id —— **取令牌里的 `sub`**（JWT payload 的 `sub`），不是登录账号。前端会做 `encodeURIComponent` |
+
+> ⚠️ 前端从 `Authorization` 里的 JWT payload 解出 `sub`（`decodeTokenSubject()`，**只解不验签**），
+> 再拼进 `userinfo/{userid}/...`。所以**后端这几个接口认的是 subject**，不是账号：
+> 账号可以改、可以重名，subject 才是稳定的主键。
+> 令牌不是 JWT 或没有 `sub` 时，前端才回落到登录账号（兼容老会话）。
 
 **响应体**：`UserProfile`
 
-| 字段          | 类型       | 说明                                 |
-| ----------- | -------- | ---------------------------------- |
-| `id`        | `string` | 用户 id，与路由参数一致                      |
-| `name`      | `string` | 显示名                                |
-| `login`     | `string` | 登录名（`@handle`）                     |
-| `avatar`    | `string` | 头像地址；为空时使用内置占位头像                   |
-| `bio`       | `string` | 一句话简介                              |
-| `followers` | `number` | 关注者数量                              |
-| `following` | `number` | 正在关注的数量                            |
-| `company`   | `string` | 所属公司；为空则不展示该行                      |
-| `location`  | `string` | 所在地；为空则不展示该行                       |
-| `website`   | `string` | 个人站点；为空则不展示该行                      |
-| `joinedAt`  | `string` | 加入日期，格式 `YYYY-MM-DD`，展示为「Joined …」 |
-| `detail`    | `string` | 主页正文，Markdown                      |
+字段名 camelCase / snake_case 两种都认，缺失字段补空串或 0 —— 不会因为少一个字段就整页报错。
 
-> 前端在用户不存在时渲染错误态，所以「找不到」应当返回非 2xx。
+| 字段          | 类型       | 说明                                          |
+| ----------- | -------- | ------------------------------------------- |
+| `id`        | `string` | 用户 id；缺失时用路径参数补                              |
+| `name`      | `string` | 显示名                                         |
+| `login`     | `string` | 登录名（`@handle`）                               |
+| `avatar`    | `string \| object` | 头像：地址、签名链接或 `{ url }` 对象（见上一节）；为空时前端自动拼成 `GET /userinfo/{userid}/avatar` |
+| `bio`       | `string` | 一句话简介                                       |
+| `followers` | `number` | 关注者数量                                       |
+| `following` | `number` | 正在关注的数量                                     |
+| `company`   | `string` | 所属公司；为空则不展示该行                               |
+| `location`  | `string` | 所在地；为空则不展示该行                                |
+| `website`   | `string` | 个人站点；为空则不展示该行                               |
+| `joinedAt`  | `string` | 加入日期，`YYYY-MM-DD`                           |
+| `detail`    | `string \| object` | 主页正文：可内联、也可给地址 / 签名链接（前端会再取一次）；为空时前端单独取 `GET /userinfo/{userid}/readme` |
 
-### `GET /users/me`
+- 鉴权：`auth: true`
+- 「找不到」返回非 2xx —— 前端会回落到本地兜底，不会显示错误页
 
-拉取**当前登录用户**的精简资料，供顶栏用户区展示。
+### `POST /userinfo/update/profile`
+
+保存资料。**提交完整对象**，不是局部 patch：后端拿到什么就是什么，不需要判断「哪些字段没传」。
+
+**请求体**：`application/json`，10 个**文本**字段
+
+| 字段          | 类型       |
+| ----------- | -------- |
+| `id`        | `string` |
+| `name`      | `string` |
+| `login`     | `string` |
+| `bio`       | `string` |
+| `followers` | `number` |
+| `following` | `number` |
+| `company`   | `string` |
+| `location`  | `string` |
+| `website`   | `string` |
+| `joinedAt`  | `string` |
+
+> ⚠️ **这个接口是 JSON，不是 multipart**：后端用 `@RequestBody UserProfile profile` 接即可。
+> 只有 `update/avatar` 与 `update/readme` 是文件上传（`@RequestPart("file") MultipartFile file`）——
+> 两类接口的注解不能混用，`@RequestBody` 接 multipart 会报 `Required request body is missing`。
+
+> ⚠️ **不含 `avatar` 与 `detail`**：头像走 `update/avatar`，正文走 `update/readme`。
+> 前端是**显式挑字段**构造 JSON 的（`UserProfilePayload`），不是把 `UserProfile` 直接序列化 ——
+> 这样「资料体到底有哪些字段」一眼可见，也不会因为给类型加字段就悄悄多发数据。
+
+- 鉴权：`auth: true`
+- **响应**：只返回状态码，无响应体（前端按 `void` 处理）
+- ⚠️ 前端只在 2xx 时更新页面；失败会**保留编辑态**并显示错误，让用户重试
+
+### `POST /userinfo/update/avatar`
+
+上传头像。
+
+**请求体**：`multipart/form-data`
+
+| 字段     | 类型 | 说明                          |
+| ------ | -- | --------------------------- |
+| `file` | 文件 | 裁剪后的 PNG，文件名 `avatar.png`，512×512 |
+
+> ⚠️ 字段名就是后端参数名 `file`，**头像与正文两个接口一致**（后端靠 URL 区分资源）。
+> 后端要用 **`@RequestPart("file") MultipartFile file`**，**不能**写 `@RequestBody` ——
+> multipart 的 body 被 `MultipartResolver` 先消费，`@RequestBody` 读到空流会报
+> `Required request body is missing`。要改字段名只需改 `userinfo.ts` 里的 `*FormField`。
+
+- 鉴权：`auth: true`
+- **响应**：只返回状态码，无响应体
+- ⚠️ 前端**不上传原图**，上传前统一处理成正方形 PNG，分两层保证：
+  - `AvatarCropper.vue` —— 用户在浏览器里裁剪（拖动 / 缩放 / 圆形遮罩），canvas 导出 512×512 PNG；
+  - `uploadAvatar()` —— 上传前再兜一次底（`utils/avatarImage.ts` 的 `normalizeAvatar()`），
+    把任何来源的图片都规整成 512×512 PNG。已合规的会原样透传，不做二次编码。
+- 体积上限 1 MB：PNG 没有质量参数可调，超出时按 **512 → 384 → 256** 阶梯缩尺寸，
+  所以后端收到的可能是这三个边长之一，但**一定是正方形 PNG**。
+
+### `GET /userinfo/:userid/avatar`
+
+取头像图片。**响应体是图片二进制**（`image/*`），不是 JSON。
+
+- 前端把它直接交给 `<img src>`，地址由 `avatarUrlOf(userid)` 拼（前缀取 `config.apiBaseUrl`）
+- ⚠️ `<img>` 拿不到 `Authorization`，这个接口需要**公开可读**（或后端改用 cookie 鉴权）
+- 图片加载失败时页面回落到内置占位头像，不会显示破图
+- 上传成功后前端会在地址后加 `?v=<时间戳>` 破缓存
+- **也可以不走这个接口**：在 `/profile` 的 `avatar` 里直接给图片地址或签名链接，前端会用那个地址（见「文件字段的三种形态」）
+
+### `POST /userinfo/update/readme`
+
+上传主页正文。
+
+**请求体**：`multipart/form-data`
+
+| 字段     | 类型 | 说明                                |
+| ------ | -- | --------------------------------- |
+| `file` | 文件 | Markdown 源文本，文件名 `readme.md`，UTF-8 |
+
+> ⚠️ 字段名同样是 `file`（`MultipartFile file`），与头像接口一致。
+
+- 鉴权：`auth: true`
+- **响应**：只返回状态码，无响应体
+- ⚠️ 前端有两个入口：编辑态的 **「保存正文」**（只发这个接口，不动资料）、以及左栏的 **「保存」**
+  （正文改过时顺带发一次，避免静默丢失改动）。正文没变化时不会重传几十 KB
+- ⚠️ 左栏保存的顺序是**先 README 后资料**：正文传失败就直接中止，不会出现「资料更新了但正文没更新」
+
+### `GET /userinfo/:userid/readme`
+
+取主页正文。
+
+**响应体**：Markdown 源文本（`text/markdown` 或 `text/plain` 都行）。
+也接受包一层 JSON 的写法：`{ "content": "..." }` / `{ "readme": "..." }`，前端三种都认。
+
+**也可以只给一个地址**（普通 URL 或对象存储的签名链接，见「文件字段的三种形态」）：
+
+```json
+{ "url": "http://127.0.0.1:9000/test/readme.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=…" }
+```
+
+前端会再 `fetch` 一次这个链接取正文（**不带 `Authorization`**，否则会被 CORS 预检拦掉）。
+链接过期（403）或跨域被拦时，正文按「空」处理，页面照常渲染，不会变成错误页。
+
+- 鉴权：`auth: true`
+- **没有 README 时返回 404**（前端据此当作「正文为空」，README 标题标注「空」）
+- 返回 204 / 空响应表示**正文被清空**，同样按空处理
+
+### `GET /users/me`（⏳ 未接入）
+
+拉取**当前登录用户**的精简资料，供顶栏用户区展示。契约保留，但当前是**本地兜底实现**。
 
 - 鉴权：`auth: true`（必须带 `Authorization: Bearer <token>`）
 - 令牌失效时返回 **401** —— 通信层收到带鉴权的 401 会**自动清掉本地会话**，界面随之回到未登录
 
 **响应体**：`CurrentUser`
 
-| 字段       | 类型       | 说明                    |
-| -------- | -------- | --------------------- |
-| `id`     | `string` | 用户 id，与路由 `/user/:id` 一致 |
-| `name`   | `string` | 显示名                   |
-| `login`  | `string` | 登录名（`@handle`）         |
-| `avatar` | `string` | 头像地址；为空时使用内置占位头像      |
+| 字段       | 类型       | 说明                                    |
+| -------- | -------- | ------------------------------------- |
+| `id`     | `string` | 用户 id —— 与令牌里的 `sub` 一致，可直接用于 `userinfo/{userid}/...` |
+| `name`   | `string` | 显示名                                   |
+| `login`  | `string` | 登录名（`@handle`）                         |
+| `avatar` | `string` | 头像地址；为空时使用内置占位头像                      |
 
-> ⚠️ 前端目前是**本地兜底实现**：不联网，直接由会话里记的账号造一份资料
-> （`id` / `name` / `login` 取账号，邮箱只取 `@` 前部分，`avatar` 为空），
+> ⚠️ 前端目前是**本地兜底实现**：不联网，从会话里造一份资料 ——
+> **`id` 解令牌的 `sub`**，`name` / `login` 取账号（邮箱只取 `@` 前部分），`avatar` 为空。
 > 于是所有已登录用户都有自己的默认主页 —— 资料字段为空、关注数为 0，
-> 没有 README.md 时界面上标注「空」。账号为空的老会话仍回落「已登录」占位。
+> 没有 README.md 时界面上标注「空」。令牌不是 JWT 时 `id` 回落账号，账号也没有就回落 `me`。
 > 接口就绪后只改 `fetchCurrentUser()` 的函数体，调用方不用动。
 
 ---
@@ -278,6 +432,22 @@
 `/login`、`/register`、`/logout` 既是**前端页面路由**（`src/router/index.ts`），也是**后端接口路径**。
 
 当 `apiBaseUrl` 留空（与站点同源）时，`POST /login` 和访问 `/login` 页面会是同一个 origin 下的同一个路径。后端部署时要么把接口挂到独立域名 / 路径前缀下（在设置 → 网络里填 `apiBaseUrl`），要么在服务端按请求方法区分。
+
+**⚠️ 头像图片不走通信层，README 走**
+
+`GET /userinfo/{userid}/avatar` 是交给 `<img src>` 的，请求不会带 `Authorization`，
+也拿不到 `ApiError` 那套错误包装。所以：
+
+- 这个接口必须**公开可读**，或者后端改用 cookie 鉴权；
+- 加载失败时前端静默回落到占位头像，界面上不会出现「接口出错」。
+
+`GET /userinfo/{userid}/readme` 相反：由 `fetchRemoteReadme()` 走通信层拉取，
+**会带令牌**、失败也会被捕获。取不到时当作「没有 README」，不影响资料本身。
+
+**⚠️ 前端只负责「按钮该不该出现」**
+
+「编辑主页 / 更换头像」由 `isOwnProfile` 决定（已登录 + 资料已加载 + 页面确实指向自己），
+但**这只是界面层的判断**，两个写接口后端仍必须自己校验令牌归属，不能信前端。
 
 **⚠️ 未定的部分**
 

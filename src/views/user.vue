@@ -15,12 +15,13 @@
       <aside class="user-page__sidebar" :aria-label="`${profile.name} 的资料`">
         <div class="user-page__avatar">
           <img
-            v-if="profile.avatar"
+            v-if="profile.avatar !== '' && !avatarFailed"
             :src="profile.avatar"
             :alt="`${profile.name} 的头像`"
             decoding="async"
+            @error="avatarFailed = true"
           >
-          <!-- 没有头像时用内置占位图，与顶栏用户区保持一致 -->
+          <!-- 没有头像 / 图片加载失败时用内置占位图，与顶栏用户区保持一致 -->
           <svg
             v-else
             viewBox="0 0 40 40"
@@ -32,7 +33,30 @@
             <circle cx="20" cy="16" r="6.5" fill="#f8fafc" />
             <path d="M20 24c-6.63 0-12 5.37-12 12v4h24v-4c0-6.63-5.37-12-12-12z" fill="#f8fafc" />
           </svg>
+
+          <!-- 编辑态才出现的换头像入口：选图 → 裁剪 → 立即上传 -->
+          <button
+            v-if="isEditing && isOwnProfile"
+            class="user-page__avatar-action"
+            type="button"
+            :disabled="avatarUploading"
+            @click="pickAvatar"
+          >
+            {{ avatarUploading ? '上传中…' : '更换头像' }}
+          </button>
         </div>
+        <p v-if="avatarError !== ''" class="user-page__edit-error" role="alert">
+          {{ avatarError }}
+        </p>
+
+        <!-- 选图用的隐藏输入；`accept` 只影响系统选择框的默认筛选 -->
+        <input
+          ref="fileInputRef"
+          class="user-page__file-input"
+          type="file"
+          accept="image/*"
+          @change="onFilePicked"
+        >
 
         <!-- 显示名：编辑态是输入框，平时是标题 -->
         <label v-if="isEditing" class="user-page__edit-field user-page__edit-field--name">
@@ -52,20 +76,6 @@
 
         <p class="user-page__login">@{{ profile.login }}</p>
 
-        <!-- 头像地址：只在编辑态出现，保存后才会换头像（避免边打字边发图片请求） -->
-        <label v-if="isEditing" class="user-page__edit-field">
-          <span class="user-page__edit-label">头像地址</span>
-          <input
-            v-model="form.avatar"
-            name="avatar"
-            class="user-page__edit-input"
-            type="text"
-            spellcheck="false"
-            autocomplete="off"
-            placeholder="留空使用内置占位头像"
-          >
-        </label>
-
         <label v-if="isEditing" class="user-page__edit-field">
           <span class="user-page__edit-label">一句话简介</span>
           <textarea
@@ -81,8 +91,13 @@
         <!-- 自己的主页：平时「编辑主页」，编辑态换成「保存 / 取消」；
              别人的主页显示「关注」（与 GitHub 一致）。 -->
         <div v-if="isOwnProfile && isEditing" class="user-page__edit-actions">
-          <button class="user-page__edit-save" type="button" @click="saveEditing">
-            保存
+          <button
+            class="user-page__edit-save"
+            type="button"
+            :disabled="isSaving"
+            @click="saveEditing"
+          >
+            {{ isSaving ? '保存中…' : '保存' }}
           </button>
           <button class="user-page__edit-cancel" type="button" @click="cancelEditing">
             取消
@@ -92,7 +107,7 @@
           v-else-if="isOwnProfile"
           class="user-page__edit"
           type="button"
-          title="编辑主页（改动不会保存）"
+          title="编辑主页"
           @click="startEditing"
         >
           编辑主页
@@ -107,9 +122,15 @@
           关注
         </button>
 
-        <!-- 编辑过但没保存：明确告诉用户刷新就没了 -->
-        <p v-if="isOwnProfile && isEdited && !isEditing" class="user-page__edit-note">
-          改动未保存，刷新后会丢失。
+        <!-- 保存结果：失败时红字常驻，成功时只留一行淡提示 -->
+        <p v-if="isOwnProfile && saveError !== ''" class="user-page__edit-error" role="alert">
+          {{ saveError }}
+        </p>
+        <p
+          v-else-if="isOwnProfile && saveNotice !== ''"
+          class="user-page__edit-note"
+        >
+          {{ saveNotice }}
         </p>
 
         <p class="user-page__counts">
@@ -235,12 +256,56 @@
               spellcheck="false"
             />
           </label>
-          <p class="user-page__edit-hint">
-            留空时 README.md 会标注为「空」；点「保存」后按 Markdown 渲染。
+
+          <!-- 正文是独立资源：这两个按钮只作用于 README，不碰左边的资料 -->
+          <div class="user-page__readme-actions">
+            <button
+              class="user-page__readme-upload"
+              type="button"
+              :disabled="readmeSaving"
+              @click="pickReadme"
+            >
+              上传 .md
+            </button>
+            <button
+              class="user-page__readme-save"
+              type="button"
+              :disabled="readmeSaving"
+              @click="saveReadme"
+            >
+              {{ readmeSaving ? '保存中…' : '保存正文' }}
+            </button>
+          </div>
+
+          <p v-if="readmeError !== ''" class="user-page__edit-error" role="alert">
+            {{ readmeError }}
           </p>
+          <p v-else-if="readmeNotice !== ''" class="user-page__edit-note user-page__readme-note">
+            {{ readmeNotice }}
+          </p>
+          <p v-else class="user-page__edit-hint">
+            正文改动要点「保存正文」才会生效；留空时 README.md 会标注为「空」。
+          </p>
+
+          <!-- 选 .md 文件用的隐藏输入；读出来填进上面的文本框，不直接上传 -->
+          <input
+            ref="readmeInputRef"
+            class="user-page__file-input"
+            type="file"
+            accept=".md,.markdown,text/markdown,text/plain"
+            @change="onReadmePicked"
+          >
         </div>
       </section>
     </div>
+
+    <!-- 头像裁剪：选完图片后弹出，确认即上传（组件内部 Teleport 到布局外壳） -->
+    <AvatarCropper
+      :open="isCropperOpen"
+      :src="cropSource"
+      @close="closeCropper"
+      @confirm="onCropConfirm"
+    />
   </DocumentMain>
 </template>
 
@@ -248,9 +313,18 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
+import AvatarCropper from '../components/common/AvatarCropper.vue'
 import MarkdownView from '../components/common/MarkdownView.vue'
 import DocumentMain from '../components/layout/DocumentMain.vue'
 import { loggedIn } from '../api/session'
+import {
+  avatarUrlOf,
+  fetchRemoteReadme,
+  imageSrcOfRef,
+  uploadAvatar,
+  uploadProfile,
+  uploadReadme,
+} from '../api/userinfo'
 import { createDefaultProfile, currentUserId, fetchCurrentUser, fetchUserProfile } from '../api/users'
 import type { UserProfile } from '../api/users'
 
@@ -285,11 +359,12 @@ const error = ref('')
 /**
  * 正在编辑的那份资料 —— `profile` 的一份副本。
  *
- * 点「保存」才写回 `profile`，点「取消」直接丢掉；不碰任何存储。
+ * 点「保存」才提交给后端，点「取消」直接丢掉。
+ * ⚠️ **头像不在表单里**：它走独立的上传接口，选完图裁剪确认就立刻上传，
+ * 所以这里的字段全是「随资料一起提交」的文本项。
  */
 const form = reactive({
   name: '',
-  avatar: '',
   bio: '',
   company: '',
   location: '',
@@ -305,8 +380,27 @@ const isEditing = ref(false)
 const nameError = ref('')
 const nameInputRef = ref<HTMLInputElement | null>(null)
 
-/** 本次访问里改过资料（只在内存里，没有任何持久化）。 */
-const isEdited = ref(false)
+/* ---------- 头像上传 ---------- */
+
+/** 选图用的隐藏 `input[type=file]`。 */
+const fileInputRef = ref<HTMLInputElement | null>(null)
+/** 裁剪器当前使用的图片地址（`URL.createObjectURL` 产物，用完要 revoke）。 */
+const cropSource = ref('')
+const isCropperOpen = ref(false)
+const avatarUploading = ref(false)
+const avatarError = ref('')
+/** 头像图片加载失败（后端没有头像 / 地址失效）时回落到占位图。 */
+const avatarFailed = ref(false)
+
+/** 原图上限：再大的图在浏览器里解码也吃力，裁剪结果反而更糊。 */
+const maxAvatarFileSize = 8 * 1024 * 1024
+
+/* ---------- 资料保存 ---------- */
+
+const isSaving = ref(false)
+const saveError = ref('')
+/** 成功提示，只在不处于编辑态时显示。 */
+const saveNotice = ref('')
 
 /** 正文来源：编辑态看表单，平时看已保存的资料。 */
 const readmeSource = computed(() => (isEditing.value ? form.detail : (profile.value?.detail ?? '')))
@@ -345,7 +439,6 @@ async function startEditing() {
   }
 
   form.name = current.name
-  form.avatar = current.avatar
   form.bio = current.bio
   form.company = current.company
   form.location = current.location
@@ -353,6 +446,11 @@ async function startEditing() {
   form.joinedAt = current.joinedAt
   form.detail = current.detail
   nameError.value = ''
+  avatarError.value = ''
+  saveError.value = ''
+  saveNotice.value = ''
+  readmeError.value = ''
+  readmeNotice.value = ''
   isEditing.value = true
 
   await nextTick()
@@ -367,18 +465,24 @@ function cancelEditing() {
 
   isEditing.value = false
   nameError.value = ''
+  avatarError.value = ''
+  saveError.value = ''
+  readmeError.value = ''
+  readmeNotice.value = ''
 }
 
 /**
- * 保存：**只替换当前页面内存里的 `profile`**。
+ * 保存资料（左栏的「保存」）。
  *
- * 刻意不写 localStorage / cookie，也不发请求 —— 刷新或离开页面就恢复原样，
- * 这是「编辑功能可用、但不保留数据」的约定。
+ * 资料字段走 `update/profile`；正文若也改过，会顺带传一次 README ——
+ * 这样「改完正文直接点左栏保存」不会静默丢改动。右栏的「保存正文」
+ * 是提前单独保存正文的入口，两边不冲突（正文没变化时不会重传）。
+ * 提交成功才更新页面，失败保留编辑态让用户重试。
  */
-function saveEditing() {
+async function saveEditing() {
   const current = profile.value
 
-  if (current === null || !isEditing.value) {
+  if (current === null || !isEditing.value || isSaving.value) {
     return
   }
 
@@ -388,10 +492,12 @@ function saveEditing() {
     return
   }
 
-  profile.value = {
+  const next: UserProfile = {
     ...current,
     name: form.name.trim(),
-    avatar: withScheme(form.avatar),
+    // 头像与正文都不进资料体（各有独立接口），但页面渲染要用，
+    // 所以内存里这份 `next` 仍然保留它们。
+    avatar: current.avatar,
     bio: form.bio.trim(),
     company: form.company.trim(),
     location: form.location.trim(),
@@ -401,9 +507,207 @@ function saveEditing() {
     detail: form.detail,
   }
 
-  isEdited.value = true
-  isEditing.value = false
-  nameError.value = ''
+  isSaving.value = true
+  saveError.value = ''
+  saveNotice.value = ''
+
+  try {
+    // 正文走独立接口，而且**只在改动时**才传 ——
+    // README 可能几十 KB，每次保存都重发一遍没有意义。
+    if (form.detail !== current.detail) {
+      await uploadReadme(form.detail)
+    }
+
+    await uploadProfile(next)
+
+    profile.value = next
+    isEditing.value = false
+    nameError.value = ''
+    saveNotice.value = '资料已保存。'
+  } catch (cause) {
+    saveError.value = cause instanceof Error ? cause.message : '保存失败，请重试。'
+  } finally {
+    isSaving.value = false
+  }
+}
+
+/* ---------- README：上传 .md / 单独保存正文 ---------- */
+
+/** 选 .md 文件用的隐藏 `input[type=file]`。 */
+const readmeInputRef = ref<HTMLInputElement | null>(null)
+const readmeSaving = ref(false)
+const readmeError = ref('')
+const readmeNotice = ref('')
+
+/** .md 文件上限：正文是纯文本，1MB 已经非常宽松。 */
+const maxReadmeFileSize = 1024 * 1024
+
+/** 打开系统文件选择框。 */
+function pickReadme() {
+  readmeError.value = ''
+  readmeNotice.value = ''
+  readmeInputRef.value?.click()
+}
+
+/**
+ * 选完 .md 文件：读出文本填进编辑器。
+ *
+ * ⚠️ **不直接上传** —— 先让用户看到内容、必要时改一改，再点「保存正文」。
+ * 直接传的话，选错文件就没有反悔余地了。
+ */
+async function onReadmePicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+
+  // 清空 value：同一个文件连续选两次也要能触发 change。
+  input.value = ''
+
+  if (file === null) {
+    return
+  }
+
+  if (file.size > maxReadmeFileSize) {
+    readmeError.value = '文件太大了，请选择 1MB 以内的 .md 文件。'
+    return
+  }
+
+  try {
+    form.detail = await file.text()
+    readmeError.value = ''
+    readmeNotice.value = `已载入 ${file.name}，点「保存正文」后生效。`
+  } catch {
+    readmeError.value = '读取文件失败，请重试。'
+  }
+}
+
+/**
+ * 单独保存正文：只发 README 接口，**不动资料字段**。
+ *
+ * 与左栏的「保存」互不牵连：改正文不用连带提交资料，改资料也不必重传正文
+ * （`saveEditing()` 里那条「只在正文变化时才传」的判断仍然保留，两边都安全）。
+ */
+async function saveReadme() {
+  const current = profile.value
+
+  if (current === null || readmeSaving.value) {
+    return
+  }
+
+  readmeSaving.value = true
+  readmeError.value = ''
+  readmeNotice.value = ''
+
+  try {
+    await uploadReadme(form.detail)
+
+    // 保存成功才写回页面：`hasReadme` 跟着变，标题旁的「空」会自动消失。
+    profile.value = { ...current, detail: form.detail }
+    readmeNotice.value = '正文已保存。'
+  } catch (cause) {
+    readmeError.value = cause instanceof Error ? cause.message : '正文保存失败，请重试。'
+  } finally {
+    readmeSaving.value = false
+  }
+}
+
+/* ---------- 头像：选图 → 裁剪 → 上传 ---------- */
+
+/** 打开系统文件选择框。 */
+function pickAvatar() {
+  avatarError.value = ''
+  fileInputRef.value?.click()
+}
+
+/** 释放上一张裁剪用的 object URL。 */
+function releaseCropSource() {
+  const url = cropSource.value
+
+  cropSource.value = ''
+
+  if (url !== '') {
+    URL.revokeObjectURL(url)
+  }
+}
+
+/**
+ * 选完文件：校验后转成 object URL 交给裁剪器。
+ *
+ * 这里**不上传原图** —— 用户可能选了张 4000×3000 的照片，
+ * 先让他在浏览器里裁成正方形再传，省流量也省后端存储。
+ */
+function onFilePicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+
+  // 清空 value：同一个文件连续选两次也要能触发 change。
+  input.value = ''
+
+  if (file === null) {
+    return
+  }
+
+  if (!file.type.startsWith('image/')) {
+    avatarError.value = '请选择图片文件（jpg / png / webp 等）。'
+    return
+  }
+
+  if (file.size > maxAvatarFileSize) {
+    avatarError.value = '图片太大了，请选择 8MB 以内的图片。'
+    return
+  }
+
+  avatarError.value = ''
+  releaseCropSource()
+  cropSource.value = URL.createObjectURL(file)
+  isCropperOpen.value = true
+}
+
+/** 关闭裁剪器并释放图片。 */
+function closeCropper() {
+  isCropperOpen.value = false
+
+  const url = cropSource.value
+
+  cropSource.value = ''
+
+  if (url !== '') {
+    // 等退出动画跑完再释放，否则 `<img>` 会在淡出时闪成空白。
+    window.setTimeout(() => URL.revokeObjectURL(url), 300)
+  }
+}
+
+/** 裁剪确认：立刻上传，成功后换掉页面上的头像地址。 */
+async function onCropConfirm(blob: Blob) {
+  closeCropper()
+
+  const current = profile.value
+
+  if (current === null) {
+    return
+  }
+
+  avatarUploading.value = true
+  avatarError.value = ''
+  saveNotice.value = ''
+
+  try {
+    const uploaded = await uploadAvatar(blob)
+
+    // 后端若回了文件引用（图片地址 / 签名链接），直接用它；只回状态码时按约定拼接口地址。
+    const remoteSrc = imageSrcOfRef(uploaded)
+
+    // 地址没变但内容变了，浏览器会拿旧缓存 —— 加时间戳强制重新请求。
+    profile.value = {
+      ...current,
+      avatar: remoteSrc !== '' ? remoteSrc : `${avatarUrlOf(current.id)}?v=${Date.now()}`,
+    }
+    avatarFailed.value = false
+    saveNotice.value = '头像已更新。'
+  } catch (cause) {
+    avatarError.value = cause instanceof Error ? cause.message : '头像上传失败，请重试。'
+  } finally {
+    avatarUploading.value = false
+  }
 }
 
 // 一改动就清掉上一次的校验提示，避免显示过期错误。
@@ -411,13 +715,17 @@ watch(form, () => {
   if (nameError.value !== '') {
     nameError.value = ''
   }
+
+  if (readmeError.value !== '') {
+    readmeError.value = ''
+  }
 }, { deep: true })
 
 /**
- * 当前登录用户的 id（`fetchCurrentUser()` 的 `id`）；未登录 / 取不到时为空串。
+ * 当前登录用户的 id（`fetchCurrentUser()` 的 `id`，即令牌里的 `sub`）；未登录 / 取不到时为空串。
  *
  * 只用来判断「这一页是不是我自己的」，与路由参数无关 —— 顶栏链接指向 `/user/me`，
- * 但用户也可能直接打开 `/user/<自己的账号>`。
+ * 但用户也可能直接打开 `/user/<自己的 id>`。
  */
 const myUserId = ref('')
 
@@ -425,7 +733,7 @@ const myUserId = ref('')
  * 这一页是不是**我自己的**主页。
  *
  * 三个条件缺一不可：已登录、资料已经加载出来（加载中 / 错误态都不显示按钮）、
- * 且这一页确实指向我 —— 保留 id `/user/me`，或资料 id 与当前账号一致。
+ * 且这一页确实指向我 —— 保留 id `/user/me`，或资料 id 与令牌里的 subject 一致。
  * 别人的主页永远不显示「编辑」。
  */
 const isOwnProfile = computed(() => {
@@ -457,8 +765,11 @@ async function load() {
   profile.value = null
   myUserId.value = ''
   isEditing.value = false
-  isEdited.value = false
   nameError.value = ''
+  avatarError.value = ''
+  avatarFailed.value = false
+  saveError.value = ''
+  saveNotice.value = ''
 
   try {
     // `/user/me` 是「当前登录用户」的保留 id：先解析成真实用户，再拉资料。
@@ -486,8 +797,18 @@ async function load() {
       } catch {
         // 后端还没有这个用户的资料：给一份**默认主页**（字段为空、计数为 0），
         // 而不是错误页或空状态 —— 所有已登录用户都应该有自己的主页。
+        const fallback = createDefaultProfile(me)
+
+        // ⚠️ 资料 404 不代表没有正文：README 是独立资源，这里单独再取一次。
+        // 不取的话，用户明明传过 README，主页上却一直标着「空」。
+        try {
+          fallback.detail = await fetchRemoteReadme(me.id)
+        } catch {
+          // 没有正文（404 / 网络不通）就保持空串。
+        }
+
         if (token === requestToken) {
-          profile.value = createDefaultProfile(me)
+          profile.value = fallback
         }
       }
 
@@ -648,6 +969,7 @@ const metaItems = computed(() => {
 /* ---------- 左栏：资料 ---------- */
 
 .user-page__avatar {
+  position: relative;
   width: 100%;
   max-width: 264px;
   aspect-ratio: 1 / 1;
@@ -655,6 +977,42 @@ const metaItems = computed(() => {
   border: 1px solid var(--up-border);
   border-radius: 50%;
   background-color: var(--up-surface);
+}
+
+/* 编辑态盖在头像上的「更换头像」：深色药丸，任何头像上都看得清 */
+.user-page__avatar-action {
+  position: absolute;
+  bottom: 12%;
+  left: 50%;
+  padding: 6px 14px;
+  border: 1px solid rgb(255 255 255 / 42%);
+  border-radius: 999px;
+  background-color: rgb(15 23 42 / 74%);
+  color: #f8fafc;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  backdrop-filter: blur(4px);
+  transition:
+    background-color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.user-page__avatar-action:hover:not(:disabled) {
+  background-color: rgb(15 23 42 / 88%);
+}
+
+.user-page__avatar-action:disabled {
+  cursor: progress;
+  opacity: 0.75;
+}
+
+/* 选图用的隐藏输入：只用它的 click()，不参与布局 */
+.user-page__file-input {
+  display: none;
 }
 
 .user-page__avatar img,
@@ -774,6 +1132,12 @@ const metaItems = computed(() => {
   opacity: 0.88;
 }
 
+.user-page__edit-save:disabled,
+.user-page__edit-cancel:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
 .user-page__edit-cancel:hover {
   border-color: var(--up-accent);
   color: var(--up-accent);
@@ -862,6 +1226,62 @@ const metaItems = computed(() => {
 /* 右栏正文编辑器：与 README 标题保持同样的上间距 */
 .user-page__readme-editor {
   margin-top: 20px;
+}
+
+/* 正文的两个按钮：左「上传 .md」右「保存正文」 */
+.user-page__readme-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.user-page__readme-upload,
+.user-page__readme-save {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--up-border);
+  border-radius: 8px;
+  background-color: var(--up-button-bg);
+  color: var(--up-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.user-page__readme-upload:hover:not(:disabled) {
+  border-color: var(--up-accent);
+  color: var(--up-accent);
+}
+
+.user-page__readme-save {
+  border-color: transparent;
+  background-color: var(--up-accent);
+  color: #ffffff;
+}
+
+/* 暗色下强调色是浅蓝，白字看不清 */
+:global(.dark-mode .user-page__readme-save) {
+  color: #0f172a;
+}
+
+.user-page__readme-save:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.user-page__readme-upload:disabled,
+.user-page__readme-save:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* 提示默认居中（左栏用），正文区改成左对齐 */
+.user-page__readme-note {
+  text-align: left;
 }
 
 .user-page__counts {

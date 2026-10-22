@@ -5,7 +5,7 @@
  * 1. 拼地址：统一以设置 → 网络里的「API Base URL」（`config.apiBaseUrl`）为前缀，
  *    由 `normalizeApiBaseUrl()` 规整；**留空或格式错误都回落到「与站点同源」的相对路径**；
  * 2. 鉴权：已登录时自动带上 `Authorization: Bearer <token>`（见 `./session.ts`）；
- * 3. 编解码：请求体自动 JSON 序列化，响应体自动按 JSON 解析；
+ * 3. 编解码：请求体自动 JSON 序列化（`FormData` 例外，见 `postForm()`），响应体自动按 JSON 解析；
  * 4. 错误：非 2xx 与「请求根本没发出去」都统一转成 `ApiError`。
  *
  * 业务模块（如 `./auth.ts`）只描述「请求哪个路径、带什么参数、返回什么类型」，
@@ -39,7 +39,12 @@ export type QueryParams = Record<string, string | number | boolean | null | unde
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-  /** 请求体；传对象会自动 JSON 序列化并带上 `Content-Type`。 */
+  /**
+   * 请求体。两种形态：
+   * - 普通对象 / 数组 → JSON 序列化，并带 `Content-Type: application/json`；
+   * - `FormData` → **原样发送**，且**不设置** `Content-Type` —— multipart 的
+   *   `boundary` 必须由浏览器自己生成，手写会漏掉它导致后端解析失败。
+   */
   body?: unknown
   query?: QueryParams
   /** 用于取消请求；被取消时原样抛出 `AbortError`，不包装成 `ApiError`。 */
@@ -147,7 +152,7 @@ async function readBody(response: Response): Promise<unknown> {
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, query, signal, auth = true } = options
   const headers: Record<string, string> = { Accept: 'application/json' }
-  let payload: string | undefined
+  let payload: BodyInit | undefined
 
   if (auth) {
     const authorization = getAuthorizationHeader()
@@ -157,7 +162,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
 
-  if (body !== undefined) {
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    // multipart：**不要**手动设 Content-Type，浏览器会自动补上带 boundary 的那一份。
+    payload = body
+  } else if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
     payload = JSON.stringify(body)
   }
@@ -209,4 +217,18 @@ export function postJson<T>(
   options: Omit<RequestOptions, 'method' | 'body'> = {},
 ): Promise<T> {
   return request<T>(path, { ...options, method: 'POST', body })
+}
+
+/**
+ * POST 请求，以 `multipart/form-data` 发送。
+ *
+ * 文件上传统一走这里：调用方自己组好 `FormData`（字段名要跟后端参数名一致），
+ * 不要手动设置 `Content-Type`。
+ */
+export function postForm<T>(
+  path: string,
+  form: FormData,
+  options: Omit<RequestOptions, 'method' | 'body'> = {},
+): Promise<T> {
+  return request<T>(path, { ...options, method: 'POST', body: form })
 }

@@ -130,6 +130,88 @@ export function getAuthorizationHeader(): string | null {
 }
 
 /**
+ * 把 base64url 编码的片段解成 UTF-8 字符串；解不出来返回空串。
+ *
+ * JWT 的 payload 用 base64url（`-` `_` 代替 `+` `/`，且**不补 padding**），
+ * 而 `atob()` 只认标准 base64，所以要先换字符、补 `=`。
+ */
+function decodeBase64Url(segment: string): string {
+  const normalized = segment.replace(/-/g, '+').replace(/_/g, '/')
+  const remainder = normalized.length % 4
+
+  // 长度 % 4 === 1 在 base64 里不可能出现，直接判为损坏。
+  if (remainder === 1) {
+    return ''
+  }
+
+  try {
+    const binary = globalThis.atob(normalized + '='.repeat((4 - remainder) % 4))
+    // `atob()` 返回的是 Latin-1，直接当 UTF-8 用会把中文解码成乱码。
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 从令牌里取出**主体**（JWT 的 `sub`）。
+ *
+ * 后端所有「按用户区分」的接口（`userinfo/{userid}/...`）都拿它当 `userid`，
+ * 而不是登录账号 —— 账号可能改、也可能重名，subject 是稳定的。
+ *
+ * ⚠️ 只解 payload，**不校验签名**：前端拿不到密钥，校验是后端的事。
+ * 解析失败（不是 JWT / 编码损坏 / 没有 `sub`）一律返回空串，由调用方回落。
+ */
+export function decodeTokenSubject(token: string): string {
+  const segments = token.split('.')
+  const payloadSegment = segments[1]
+
+  // 至少要有 header.payload 两段；不是 JWT 的令牌（比如随机串）直接放弃。
+  if (segments.length < 2 || payloadSegment === undefined) {
+    return ''
+  }
+
+  const payload = decodeBase64Url(payloadSegment)
+
+  if (payload === '') {
+    return ''
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(payload)
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return ''
+    }
+
+    const record = parsed as Record<string, unknown>
+    const subject = record.sub ?? record.subject
+
+    if (typeof subject === 'string') {
+      return subject.trim()
+    }
+
+    // 后端把主键当数字塞进 `sub` 的情况很常见。
+    if (typeof subject === 'number' && Number.isFinite(subject)) {
+      return String(subject)
+    }
+
+    return ''
+  } catch {
+    return ''
+  }
+}
+
+/** 当前会话的主体（`sub`）；未登录或令牌不是 JWT 时为空串。 */
+export function getSessionSubject(): string {
+  const current = session.value
+
+  return current === null ? '' : decodeTokenSubject(current.token)
+}
+
+/**
  * 保存会话。
  *
  * 先更新内存（立即生效），再尝试写入 `localStorage`；写入失败（隐私模式 / 配额满）
