@@ -901,9 +901,9 @@ const metaItems = computed(() => {
   margin: 0;
 }
 
-/* 注意：Vue 的 :global() 会用括号内内容整体替换选择器，完整选择器必须写在括号里。
-   `DocumentMain` 自带的暗色覆盖目前是坏的（同样的塌缩写法），所以卡片在暗色下仍是
-   亮色玻璃 —— 那个文件按约定不动，这里用更具体的选择器把本页局部兜住。 */
+/* 暗色下只补本页自己的 `--up-*` 变量：卡片的底色 / 边框 / 阴影由 `DocumentMain` 统一提供
+   （它的暗色规则已改成正确写法，值就是这里的 26.9% / 12% / 40px 阴影），不在这里重复声明。
+   注意：Vue 的 :global() 会用括号内内容整体替换选择器，完整选择器必须写在括号里。 */
 :global(.dark-mode .user-page-card) {
   --up-text: #e2e8f0;
   --up-heading: #f8fafc;
@@ -913,10 +913,6 @@ const metaItems = computed(() => {
   --up-accent: #7dd3fc;
   --up-button-bg: rgb(255 255 255 / 8%);
   --up-tab-active: #fdba74;
-
-  border-color: rgb(255 255 255 / 12%);
-  background-color: rgb(15 23 42 / 26.9%);
-  box-shadow: 0 16px 40px rgb(0 0 0 / 28%);
 }
 
 .user-page__status {

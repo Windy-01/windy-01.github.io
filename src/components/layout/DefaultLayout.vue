@@ -166,14 +166,15 @@ onUnmounted(() => {
   justify-content: center;
   gap: 24px;
   width: 96%;
-  margin: 88px auto 0;
+  /* 让出顶栏（高度 + 间距都由 globals.css 的变量给出） */
+  margin: calc(var(--header-height) + var(--header-gap)) auto 0;
   padding: 0 24px 24px;
 }
 
 .aside-slot {
   flex: 0 0 240px;
   width: 240px;
-  min-height: calc(100vh - 112px);
+  min-height: calc(100vh - var(--header-height) - var(--header-gap) * 2);
   transition:
     flex-basis 0.25s ease,
     width 0.25s ease;

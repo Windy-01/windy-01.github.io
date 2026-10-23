@@ -421,7 +421,8 @@ onUnmounted(() => {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 64px;
+  /* 高度由 globals.css 的 `--header-height` 统一控制（桌面 / 移动端同值） */
+  min-height: var(--header-height);
   padding: 0 24px;
   border-bottom: 1px solid rgb(15 23 42 / 10%);
   color: #1e293b;
@@ -461,7 +462,7 @@ onUnmounted(() => {
   position: absolute;
   left: 50%;
   display: flex;
-  height: 64px;
+  height: var(--header-height);
   transform: translateX(-50%);
 }
 
@@ -470,7 +471,7 @@ onUnmounted(() => {
   display: grid;
   place-items: center;
   min-width: 136px;
-  height: 64px;
+  height: var(--header-height);
   padding: 0 32px;
   border: 0;
   border-right: 1px solid transparent;
@@ -702,53 +703,53 @@ onUnmounted(() => {
   background-color: rgb(15 23 42 / 8%);
 }
 
-:global(.dark-mode) .header-brand {
+:global(.dark-mode .header-brand) {
   color: #cbd5e1;
 }
 
-:global(.dark-mode) .header-brand:hover {
+:global(.dark-mode .header-brand:hover) {
   background-color: rgb(255 255 255 / 10%);
   color: #f8fafc;
 }
 
-:global(.dark-mode) .header-user {
+:global(.dark-mode .header-user) {
   color: #cbd5e1;
 }
 
-:global(.dark-mode) .header-user:hover {
+:global(.dark-mode .header-user:hover) {
   background-color: rgb(255 255 255 / 10%);
   color: #f8fafc;
 }
 
-:global(.dark-mode) .header-user__avatar {
+:global(.dark-mode .header-user__avatar) {
   background-color: rgb(51 65 85 / 70%);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%);
 }
 
-:global(.dark-mode) .layout-header {
+:global(.dark-mode .layout-header) {
   background-color: rgb(15 23 42 / 31.2%);
 }
 
 @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
-  :global(.dark-mode) .layout-header {
+  :global(.dark-mode .layout-header) {
     background-color: rgb(15 23 42 / 88%);
   }
 
-  :global(.dark-mode) .layout-header__menu-layer {
+  :global(.dark-mode .layout-header__menu-layer) {
     background-color: rgb(2 6 23 / 82%);
   }
 }
 
-:global(.dark-mode) .layout-header__content {
+:global(.dark-mode .layout-header__content) {
   border-bottom-color: rgb(255 255 255 / 12%);
   color: #e2e8f0;
 }
 
-:global(.dark-mode) .layout-header__buttons :deep(.header-action) {
+:global(.dark-mode .layout-header__buttons .header-action) {
   color: #cbd5e1;
 }
 
-:global(.dark-mode) .layout-header__buttons :deep(.header-action:hover) {
+:global(.dark-mode .layout-header__buttons .header-action:hover) {
   background: radial-gradient(
     ellipse at center,
     rgb(15 23 42 / 62%) 0%,
@@ -758,16 +759,16 @@ onUnmounted(() => {
   color: #f8fafc;
 }
 
-:global(.dark-mode) .layout-header__mobile-menu {
+:global(.dark-mode .layout-header__mobile-menu) {
   background-color: rgb(15 23 42 / 94%);
   box-shadow: 12px 0 32px rgb(0 0 0 / 35%);
 }
 
-:global(.dark-mode) .layout-header__mobile-actions :deep(.header-action) {
+:global(.dark-mode .layout-header__mobile-actions .header-action) {
   color: #cbd5e1;
 }
 
-:global(.dark-mode) .layout-header__mobile-actions :deep(.header-action:hover) {
+:global(.dark-mode .layout-header__mobile-actions .header-action:hover) {
   background-color: rgb(255 255 255 / 10%);
 }
 
@@ -856,8 +857,8 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
+  /* 高度与桌面一致（`--header-height`），这里只收窄左右内边距 */
   .layout-header__content {
-    min-height: 56px;
     padding: 0 16px;
   }
 
@@ -890,7 +891,7 @@ onUnmounted(() => {
     display: none;
   }
 
-  :global(.dark-mode) .layout-header__menu-toggle {
+  :global(.dark-mode .layout-header__menu-toggle) {
     background-color: rgb(15 23 42 / 55%);
     color: #e2e8f0;
   }

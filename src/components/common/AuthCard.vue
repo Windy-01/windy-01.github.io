@@ -83,15 +83,8 @@ withDefaults(
   --auth-danger: #fca5a5;
 }
 
-/* `DocumentMain` 自带的暗色覆盖目前是坏的（`:global(.dark-mode) .xxx` 会被编译器
-   塌缩成裸 `.dark-mode`），所以卡片在暗色下仍是亮色玻璃 —— 而正文颜色已经是浅色。
-   那个文件暂时按约定不动，这里用更具体的选择器把认证卡片局部兜住。
-   选择器里带上 `.layout-document-main` 是为了稳赢 `DocumentMain` 自己的样式，不依赖顺序。 */
-:global(.dark-mode .layout-document-main.auth-card) {
-  border-color: rgb(255 255 255 / 12%);
-  background-color: rgb(15 23 42 / 26.9%);
-  box-shadow: 0 16px 40px rgb(0 0 0 / 28%);
-}
+/* 卡片的底色 / 边框 / 阴影由 `DocumentMain` 统一提供（暗色下 26.9% 深蓝 + 12% 白边），
+   这里只补认证卡片自己的 `--auth-*` 变量，不重复声明那三条。 */
 
 .auth-card__header {
   margin-bottom: 20px;

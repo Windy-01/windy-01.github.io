@@ -17,7 +17,7 @@ import SearchBox from '../components/common/SearchBox.vue'
   display: flex;
   flex: 1 1 auto;
   justify-content: center;
-  min-height: calc(100vh - 112px);
+  min-height: calc(100vh - var(--header-height) - var(--header-gap) * 2);
 }
 
 .home-search-content {
@@ -38,7 +38,8 @@ import SearchBox from '../components/common/SearchBox.vue'
   .home-content {
     flex: 1 1 auto;
     width: 100%;
-    min-height: calc(100vh - 88px);
+    /* 移动端没有底部留白，只扣顶栏高度 + 间距 */
+    min-height: calc(100vh - var(--header-height) - var(--header-gap));
   }
 
   .home-search-content {

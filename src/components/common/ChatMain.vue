@@ -629,7 +629,8 @@ onUnmounted(() => {
 .chat-main {
   flex: 0 0 auto;
   width: 80%;
-  height: calc(100vh - 112px);
+  /* 顶栏高度与间距取自 globals.css，改高度不用动这里 */
+  height: calc(100vh - var(--header-height) - var(--header-gap) * 2);
 }
 
 /* 去掉 DocumentMain 作为“外圈”的存在：不再有边框、阴影与内边距，
@@ -866,17 +867,17 @@ onUnmounted(() => {
   opacity: 1;
 }
 
-:global(.dark-mode) .chat-workspace {
+:global(.dark-mode .chat-workspace) {
   --chat-rail-bg: rgb(15 23 42 / 16%);
   --chat-side-bg: rgb(15 23 42 / 22%);
 }
 
-:global(.dark-mode) .chat-col--rail,
-:global(.dark-mode) .chat-col--side {
+:global(.dark-mode .chat-col--rail),
+:global(.dark-mode .chat-col--side) {
   border-color: rgb(255 255 255 / 10%);
 }
 
-:global(.dark-mode) .chat-side__search {
+:global(.dark-mode .chat-side__search) {
   border-bottom-color: rgb(255 255 255 / 10%);
 }
 
@@ -903,26 +904,26 @@ onUnmounted(() => {
   color: #94a3b8;
 }
 
-:global(.dark-mode) .chat-pane--display {
+:global(.dark-mode .chat-pane--display) {
   background-color: rgb(15 23 42 / 20%);
 }
 
-:global(.dark-mode) .chat-compose__tools {
+:global(.dark-mode .chat-compose__tools) {
   background-color: rgb(15 23 42 / 12%);
 }
 
-:global(.dark-mode) .chat-compose__input {
+:global(.dark-mode .chat-compose__input) {
   background-color: rgb(15 23 42 / 26%);
 }
 
-:global(.dark-mode) .chat-splitter::after {
+:global(.dark-mode .chat-splitter::after) {
   background-color: rgb(255 255 255 / 18%);
 }
 
 @media (max-width: 768px) {
   .chat-main {
     width: 100%;
-    height: calc(100vh - 88px);
+    height: calc(100vh - var(--header-height) - var(--header-gap));
   }
 
   .chat-main :deep(.layout-document-main.layout-document-main) {

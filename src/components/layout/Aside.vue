@@ -152,13 +152,14 @@ onUnmounted(() => {
 <style scoped>
 .layout-aside {
   position: fixed;
-  top: 88px;
+  /* 顶栏高度 + 间距，两个值都来自 globals.css，改高度不用动这里 */
+  top: calc(var(--header-height) + var(--header-gap));
   left: 24px;
   z-index: 9;
   display: flex;
   flex-direction: column;
   width: 240px;
-  height: calc(100vh - 112px);
+  height: calc(100vh - var(--header-height) - var(--header-gap) * 2);
   align-self: flex-start;
   flex-shrink: 0;
   min-width: 0;
@@ -357,7 +358,7 @@ onUnmounted(() => {
   }
 }
 
-:global(.dark-mode) .layout-aside {
+:global(.dark-mode .layout-aside) {
   border-color: rgb(255 255 255 / 12%);
   background-color: rgb(15 23 42 / 42%);
   box-shadow: 0 16px 40px rgb(0 0 0 / 28%);
@@ -365,48 +366,60 @@ onUnmounted(() => {
 }
 
 @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
-  :global(.dark-mode) .layout-aside {
+  :global(.dark-mode .layout-aside) {
     background-color: rgb(15 23 42 / 88%);
   }
 
-  :global(.dark-mode) .back-to-top,
-  :global(.dark-mode) .aside-popup-toggle {
+  :global(.dark-mode .back-to-top),
+  :global(.dark-mode .aside-popup-toggle) {
     background-color: rgb(15 23 42 / 92%);
   }
 }
 
-:global(.dark-mode) .layout-aside__toggle {
-  background-color: rgb(15 23 42 / 55%);
+/* 面板内的可点项（导航 / 便签 / 设置 / 主题切换）：暗色下统一「浅色文字 + 白色低透明 hover」，
+   与顶栏按钮（`.header-action:hover` 同样是 10% 白）保持一致。
+   ⚠️ `.aside-action`（便签 / 设置）以前**完全没有暗色规则** —— 文字停在亮色的 `#334155`，
+   叠在 42% 深蓝玻璃上几乎看不见，hover 还会冒出一块 55% 的白底。 */
+:global(.dark-mode .side-navigation a),
+:global(.dark-mode .aside-action),
+:global(.dark-mode .theme-toggle) {
+  color: #cbd5e1;
+}
+
+:global(.dark-mode .side-navigation a:hover),
+:global(.dark-mode .aside-action:hover),
+:global(.dark-mode .theme-toggle:hover) {
+  background-color: rgb(255 255 255 / 10%);
+  color: #f8fafc;
+}
+
+/* 主题切换上沿的分隔线：亮色是深色 10%，暗色下换成白色 12% 才看得见 */
+:global(.dark-mode .theme-toggle) {
+  border-top-color: rgb(255 255 255 / 12%);
+}
+
+/* 折叠按钮：原来是「深色底 + hover 更深」，在深蓝玻璃上几乎没有反馈，改成白色系 */
+:global(.dark-mode .layout-aside__toggle) {
+  background-color: rgb(255 255 255 / 12%);
   color: #e2e8f0;
 }
 
-:global(.dark-mode) .layout-aside__toggle:hover {
-  background-color: rgb(15 23 42 / 85%);
+:global(.dark-mode .layout-aside__toggle:hover) {
+  background-color: rgb(255 255 255 / 20%);
 }
 
-:global(.dark-mode) .side-navigation a {
-  color: #cbd5e1;
-}
-
-:global(.dark-mode) .side-navigation a:hover,
-:global(.dark-mode) .theme-toggle:hover {
-  background-color: rgb(15 23 42 / 55%);
-}
-
-:global(.dark-mode) .theme-toggle {
-  border-top-color: rgb(255 255 255 / 12%);
-  color: #cbd5e1;
-}
-
-:global(.dark-mode) .back-to-top,
-:global(.dark-mode) .aside-popup-toggle {
+/* 浮在页面上的两个圆形按钮：要足够「实」才不会被背景图吃掉，保持深底，只补 hover */
+:global(.dark-mode .back-to-top),
+:global(.dark-mode .aside-popup-toggle) {
   border-color: rgb(255 255 255 / 12%);
   background-color: rgb(15 23 42 / 72%);
   color: #e2e8f0;
 }
 
-:global(.dark-mode) .back-to-top:hover {
-  background-color: rgb(30 41 59 / 90%);
+:global(.dark-mode .back-to-top:hover),
+:global(.dark-mode .aside-popup-toggle:hover) {
+  background-color: rgb(30 41 59 / 94%);
+  color: #f8fafc;
 }
 
 @keyframes layout-fade-in {

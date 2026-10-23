@@ -32,14 +32,14 @@
   }
 }
 
-:global(.dark-mode) .layout-document-main {
+:global(.dark-mode .layout-document-main) {
   border-color: rgb(255 255 255 / 12%);
   background-color: rgb(15 23 42 / 26.9%);
   box-shadow: 0 16px 40px rgb(0 0 0 / 28%);
 }
 
 @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
-  :global(.dark-mode) .layout-document-main {
+  :global(.dark-mode .layout-document-main) {
     background-color: rgb(15 23 42 / 88%);
   }
 }
