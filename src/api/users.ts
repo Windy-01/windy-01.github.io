@@ -1,44 +1,54 @@
 /**
  * 用户资料数据源。
  *
- * `user` 栏目的资料由**后端接口**提供（`GET userinfo/{id}/profile`，前缀见 `config.apiBaseUrl`），
+ * `user` 栏目的资料由**后端接口**提供（`GET userinfo/{userid}/profile`，前缀见 `config.apiBaseUrl`），
  * 所以对外只暴露 Promise 化的 `fetchUserProfile(id)` —— 组件不关心数据从哪来。
  *
- * 接口拿不到时按下面的顺序回落，保证页面永远有内容可看：
- * 1. 后端返回的资料；
- * 2. 本地注册表（`dev` 这个占位用户，主页正文是 `tmp/user-dev.md`）；
- * 3. 已登录用户的**默认主页**（`createDefaultProfile()`，字段全空、计数 0）。
+ * 路由只认三种形态：`/user/me`（当前登录用户）、`/user/dev`（本地占位）、
+ * `/user/<userid>`（按 userid 取后端资料）。**不支持用账号名访问。**
  */
 
 import devDetailSource from '../../tmp/user-dev.md?raw'
+import { ApiError } from './http'
 import { decodeTokenSubject, session } from './session'
 import { avatarUrlOf, fetchRemoteProfile, fetchRemoteReadme } from './userinfo'
 
-/** 一个用户的公开资料。 */
+/**
+ * 一个用户的公开资料。
+ *
+ * 字段分两类（编辑态据此决定哪些能改）：
+ * - **可改**：`name`（用户名，走独立接口）、`bio`、`website`、`age`、`birthday`、`phone`；
+ * - **只读**：`id`（userid）、`email`、`login`（@handle）、`followers`、`following`、`joinedAt`；
+ * - `avatar` / `detail` 是独立资源（各自有上传接口），不随资料体提交。
+ */
 export interface UserProfile {
-  /** 用户 id，与路由参数 `/user/:id` 一致。 */
+  /** 用户 id（userid，令牌里的 `sub`），与路由参数 `/user/:id` 一致。只读。 */
   id: string
-  /** 显示名。 */
+  /** 用户名。可改，但走**独立接口**（`update/username`），不随资料体提交。 */
   name: string
-  /** 登录名（@handle）。 */
+  /** 登录名（@handle），只读。 */
   login: string
   /** 头像地址；为空时使用内置占位头像。 */
   avatar: string
   /** 一句话简介。 */
   bio: string
-  /** 关注者数量；默认为 0。 */
-  followers: number
-  /** 正在关注的数量；默认为 0。 */
-  following: number
-  /** 所属公司；为空则不展示该行。 */
-  company: string
-  /** 所在地；为空则不展示该行。 */
-  location: string
+  /** 邮箱。只读，编辑态不出现，也不随资料体提交。 */
+  email: string
   /** 个人站点；为空则不展示该行。 */
   website: string
-  /** 加入日期（`YYYY-MM-DD`），展示为「Joined …」。 */
+  /** 年龄；0 表示没填（不展示该行）。 */
+  age: number
+  /** 生日（`YYYY-MM-DD`）；为空则不展示该行。 */
+  birthday: string
+  /** 电话。 */
+  phone: string
+  /** 关注者数量；只读，默认 0。 */
+  followers: number
+  /** 正在关注的数量；只读，默认 0。 */
+  following: number
+  /** 加入日期（`YYYY-MM-DD`），只读。 */
   joinedAt: string
-  /** 主页正文，Markdown。 */
+  /** 主页正文，Markdown（独立资源）。 */
   detail: string
 }
 
@@ -50,11 +60,13 @@ const localUsers: Record<string, Omit<UserProfile, 'id'>> = {
     // 留空表示使用内置占位头像。
     avatar: '',
     bio: '全栈方向，喜欢把想法做成能跑起来的东西。',
+    email: 'windy@example.com',
+    website: 'https://github.com/Windy-01',
+    age: 22,
+    birthday: '2004-03-08',
+    phone: '13800000000',
     followers: 0,
     following: 0,
-    company: 'Independent',
-    location: 'China',
-    website: 'https://github.com/Windy-01',
     joinedAt: '2024-03-08',
     detail: devDetailSource,
   },
@@ -63,43 +75,54 @@ const localUsers: Record<string, Omit<UserProfile, 'id'>> = {
 /**
  * 按 id 拉取用户资料。
  *
- * 先请求后端；**任何失败都回落到本地注册表**（404 表示该用户还没有资料、
- * 网络不通表示后端没起来 —— 两种情况下把页面变成错误页都没有意义）。
- * 注册表里也没有时才算「用户不存在」，抛错让调用方渲染错误态。
+ * 路由只认三种形态（**不再支持用账号名访问**）：
+ * - `/user/me` —— 当前登录用户，由 `views/user.vue` 先解析成 userid 再调这里；
+ * - `/user/dev` —— 本地占位用户，直接读 `localUsers`，不联网；
+ * - `/user/<userid>` —— 只按 **userid** 请求后端。
  *
- * @param id 路由参数里的用户 id。
- * @throws 后端与本地注册表都没有这个用户时抛错。
+ * ⚠️ 除 `dev` 外**不再回落到本地注册表 / 账号**：以前「后端失败就按 id 查注册表」
+ * 会让任意账号名都能打开一页资料，等于变相支持了 username 访问。现在拿不到就抛错，
+ * 由调用方渲染错误态（`/user/me` 在 `user.vue` 里有「默认主页」兜底，不受影响）。
+ *
+ * @param id 路由参数：`dev` 或 userid（`me` 会先被解析掉）。
+ * @throws 后端取不到这个 userid 的资料时抛错。
  */
 export async function fetchUserProfile(id: string): Promise<UserProfile> {
+  const dev = localUsers[devUserId]
+
+  if (id === devUserId && dev !== undefined) {
+    return { id, ...dev }
+  }
+
+  let remote: UserProfile
+
   try {
-    const remote = await fetchRemoteProfile(id)
-
-    // 后端资料里没带头像地址时，按约定的头像接口补一个：
-    // 头像和资料是两个接口，资料体里往往只存「有没有头像」而不存 URL。
-    if (remote.avatar.trim() === '') {
-      remote.avatar = avatarUrlOf(remote.id)
+    remote = await fetchRemoteProfile(id)
+  } catch (cause) {
+    // 404 = 这个 userid 没有资料。**不再按账号名回落**，所以直接告诉用户
+    // 「本页只认 me / dev / userid」比抛一句「请求失败（404）」清楚得多。
+    if (cause instanceof ApiError && cause.status === 404) {
+      throw new Error(`没有找到 ID 为「${id}」的用户（本页只支持 /user/me、/user/dev 与 userid）。`)
     }
 
-    // README 也是独立资源，资料体里不带它。接口 404 表示「还没写过 README」，
-    // 保持空串即可 —— 不能因为这一项失败就把整份资料丢掉。
-    try {
-      remote.detail = await fetchRemoteReadme(remote.id)
-    } catch {
-      // 保留资料里可能带回来的 detail（通常是空串）。
-    }
+    throw cause
+  }
 
-    return remote
+  // 后端资料里没带头像地址时，按约定的头像接口补一个：
+  // 头像和资料是两个接口，资料体里往往只存「有没有头像」而不存 URL。
+  if (remote.avatar.trim() === '') {
+    remote.avatar = avatarUrlOf(remote.id)
+  }
+
+  // README 也是独立资源，资料体里不带它。接口 404 表示「还没写过 README」，
+  // 保持空串即可 —— 不能因为这一项失败就把整份资料丢掉。
+  try {
+    remote.detail = await fetchRemoteReadme(remote.id)
   } catch {
-    // 落到本地兜底，见上面的说明。
+    // 保留资料里可能带回来的 detail（通常是空串）。
   }
 
-  const profile = localUsers[id]
-
-  if (profile === undefined) {
-    throw new Error(`没有找到用户「${id}」。`)
-  }
-
-  return { id, ...profile }
+  return remote
 }
 
 /**
@@ -110,6 +133,13 @@ export async function fetchUserProfile(id: string): Promise<UserProfile> {
  * 未登录时访问这个路由会被路由守卫送去登录页。
  */
 export const currentUserId = 'me'
+
+/**
+ * 本地占位用户的保留 id（`/user/dev`）。
+ *
+ * 未登录时顶栏的「个人主页」指向它，资料来自 `localUsers`，不联网。
+ */
+export const devUserId = 'dev'
 
 /**
  * 「当前登录用户」的精简资料（顶栏用户区用）。
@@ -199,11 +229,13 @@ export function createDefaultProfile(user: CurrentUser): UserProfile {
     login: login !== '' ? login : 'me',
     avatar: user.avatar.trim() !== '' ? user.avatar : avatarUrlOf(user.id),
     bio: '',
+    email: '',
+    website: '',
+    age: 0,
+    birthday: '',
+    phone: '',
     followers: 0,
     following: 0,
-    company: '',
-    location: '',
-    website: '',
     joinedAt: '',
     detail: '',
   }

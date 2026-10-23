@@ -58,9 +58,9 @@
           @change="onFilePicked"
         >
 
-        <!-- 显示名：编辑态是输入框，平时是标题 -->
+        <!-- 用户名：编辑态是输入框，平时是标题。它走独立接口保存，不随资料体提交。 -->
         <label v-if="isEditing" class="user-page__edit-field user-page__edit-field--name">
-          <span class="user-page__edit-label">显示名</span>
+          <span class="user-page__edit-label">用户名</span>
           <input
             ref="nameInputRef"
             v-model="form.name"
@@ -139,26 +139,16 @@
           <span><strong>{{ profile.following }}</strong> 正在关注</span>
         </p>
 
-        <!-- 资料行：编辑态换成四个输入框，平时是有图标的信息行 -->
+        <!-- 可改资料：编辑态换成输入框，平时是有图标的信息行。
+             ⚠️ 邮箱与 userid 是只读的，不在这里 —— 它们只出现在信息行里。 -->
         <div v-if="isEditing" class="user-page__edit-fields">
           <label class="user-page__edit-field">
-            <span class="user-page__edit-label">公司</span>
+            <span class="user-page__edit-label">电话</span>
             <input
-              v-model="form.company"
-              name="company"
+              v-model="form.phone"
+              name="phone"
               class="user-page__edit-input"
-              type="text"
-              autocomplete="off"
-            >
-          </label>
-
-          <label class="user-page__edit-field">
-            <span class="user-page__edit-label">所在地</span>
-            <input
-              v-model="form.location"
-              name="location"
-              class="user-page__edit-input"
-              type="text"
+              type="tel"
               autocomplete="off"
             >
           </label>
@@ -177,12 +167,26 @@
           </label>
 
           <label class="user-page__edit-field">
-            <span class="user-page__edit-label">加入日期</span>
+            <span class="user-page__edit-label">生日</span>
             <input
-              v-model="form.joinedAt"
-              name="joinedAt"
+              v-model="form.birthday"
+              name="birthday"
               class="user-page__edit-input"
               type="date"
+            >
+          </label>
+
+          <label class="user-page__edit-field">
+            <span class="user-page__edit-label">年龄</span>
+            <input
+              v-model="form.age"
+              name="age"
+              class="user-page__edit-input"
+              type="number"
+              min="0"
+              max="150"
+              inputmode="numeric"
+              placeholder="留空表示不展示"
             >
           </label>
         </div>
@@ -324,29 +328,42 @@ import {
   uploadAvatar,
   uploadProfile,
   uploadReadme,
+  uploadUsername,
 } from '../api/userinfo'
 import { createDefaultProfile, currentUserId, fetchCurrentUser, fetchUserProfile } from '../api/users'
 import type { UserProfile } from '../api/users'
 
 /** 资料区里的小图标，用 feather 风格的描边路径。 */
-const iconBuilding = [
-  'M3 21h18',
-  'M6 21V5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v16',
-  'M13 9h4a1 1 0 0 1 1 1v11',
-  'M9.5 8h1M9.5 12h1M9.5 16h1',
+const iconMail = [
+  'M3.5 6.5A1.5 1.5 0 0 1 5 5h14a1.5 1.5 0 0 1 1.5 1.5v11A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z',
+  'M3.8 6.7 12 13l8.2-6.3',
 ]
-const iconLocation = [
-  'M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11Z',
-  'M12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
+const iconPhone = [
+  'M6.6 3h3l1.4 3.9-1.9 1.5a12.5 12.5 0 0 0 5.5 5.5l1.5-1.9L20 13.4v3a2 2 0 0 1-2.2 2A16.4 16.4 0 0 1 4.1 5.2 2 2 0 0 1 6.1 3Z',
 ]
 const iconLink = [
   'M10.5 13.5a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7l-1.4 1.4',
   'M13.5 10.5a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 0 0 5.7 5.7l1.4-1.4',
 ]
+const iconCake = [
+  'M4 20.5h16',
+  'M5.5 20.5v-6a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v6',
+  'M5.5 16.5c1.6 1.4 3.2 1.4 4.8 0s3.2-1.4 4.8 0 2.4 1 3.4.4',
+  'M12 12.5V9.5',
+  'M12 6.6c.9-1.2 0-2.6 0-2.6s-.9 1.4 0 2.6Z',
+]
+const iconUser = [
+  'M12 12.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
+  'M4.5 21a7.5 7.5 0 0 1 15 0',
+]
 const iconCalendar = [
   'M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v12A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5Z',
   'M4 10h16',
   'M8.5 3v4M15.5 3v4',
+]
+const iconHash = [
+  'M9.5 3.5 7 20.5M17 3.5 14.5 20.5',
+  'M4 9h16M3 15h16',
 ]
 
 const route = useRoute()
@@ -360,23 +377,31 @@ const error = ref('')
  * 正在编辑的那份资料 —— `profile` 的一份副本。
  *
  * 点「保存」才提交给后端，点「取消」直接丢掉。
- * ⚠️ **头像不在表单里**：它走独立的上传接口，选完图裁剪确认就立刻上传，
- * 所以这里的字段全是「随资料一起提交」的文本项。
+ *
+ * ⚠️ **只放可改字段**：简介 / 个人站点 / 年龄 / 生日 / 电话，
+ * 加上单独走接口的用户名与 README 正文。头像也不在这里（选完图立刻上传）。
+ * **邮箱、关注数、加入日期、userid 都是只读的**，编辑态不出现 —— 它们只在信息行里展示。
+ *
+ * `age` 用字符串：输入框清空时是空串（= 没填），提交时再转成数字。
+ * ⚠️ 但 `type="number"` 的输入框会被 Vue 的 v-model **自动转成数字**
+ * （`vModelText` 对 `type === 'number'` 会做 `looseToNumber`），所以这里的类型
+ * 必须是 `string | number`，读取时统一 `String(...)` 再 `trim()` —— 否则
+ * 用户一动年龄输入框，`form.age.trim()` 就会抛 `trim is not a function`。
  */
 const form = reactive({
   name: '',
   bio: '',
-  company: '',
-  location: '',
   website: '',
-  joinedAt: '',
+  age: '' as string | number,
+  birthday: '',
+  phone: '',
   detail: '',
 })
 
 /** 是否处于行内编辑态：页面上的静态文字就地换成输入框。 */
 const isEditing = ref(false)
 
-/** 显示名不能为空：它是左栏标题与 README 标题里唯一的标识。 */
+/** 用户名不能为空：它是左栏标题与 README 标题里唯一的标识。 */
 const nameError = ref('')
 const nameInputRef = ref<HTMLInputElement | null>(null)
 
@@ -430,7 +455,7 @@ function withScheme(value: string): string {
   return `https://${trimmed}`
 }
 
-/** 进入编辑态：把当前资料拷进表单，并聚焦显示名。 */
+/** 进入编辑态：把当前资料拷进表单，并聚焦用户名输入框。 */
 async function startEditing() {
   const current = profile.value
 
@@ -440,10 +465,11 @@ async function startEditing() {
 
   form.name = current.name
   form.bio = current.bio
-  form.company = current.company
-  form.location = current.location
   form.website = current.website
-  form.joinedAt = current.joinedAt
+  // 0 表示没填过，编辑框里保持空而不是显示一个 "0"
+  form.age = current.age > 0 ? String(current.age) : ''
+  form.birthday = current.birthday
+  form.phone = current.phone
   form.detail = current.detail
   nameError.value = ''
   avatarError.value = ''
@@ -474,10 +500,12 @@ function cancelEditing() {
 /**
  * 保存资料（左栏的「保存」）。
  *
- * 资料字段走 `update/profile`；正文若也改过，会顺带传一次 README ——
- * 这样「改完正文直接点左栏保存」不会静默丢改动。右栏的「保存正文」
- * 是提前单独保存正文的入口，两边不冲突（正文没变化时不会重传）。
- * 提交成功才更新页面，失败保留编辑态让用户重试。
+ * 三件事分开提交，顺序固定：
+ * 1. **用户名**（改过才发）走独立接口 `update/username` —— 它不随资料体一起提交；
+ * 2. **README**（改过才发）走独立接口 `update/readme` —— 可能几十 KB，没必要每次重传；
+ * 3. **其余资料**走 `update/profile`。
+ *
+ * 任何一步失败都**保留编辑态**，让用户能重试；成功才写回页面。
  */
 async function saveEditing() {
   const current = profile.value
@@ -487,10 +515,14 @@ async function saveEditing() {
   }
 
   if (form.name.trim() === '') {
-    nameError.value = '显示名不能为空。'
+    nameError.value = '用户名不能为空。'
     nameInputRef.value?.focus()
     return
   }
+
+  // `age` 可能是数字（`type="number"` 的 v-model 会转），统一按字符串处理
+  const ageText = String(form.age).trim()
+  const age = Number.parseInt(ageText, 10)
 
   const next: UserProfile = {
     ...current,
@@ -499,10 +531,13 @@ async function saveEditing() {
     // 所以内存里这份 `next` 仍然保留它们。
     avatar: current.avatar,
     bio: form.bio.trim(),
-    company: form.company.trim(),
-    location: form.location.trim(),
+    // 邮箱只读：表单里没有它，原样带回
+    email: current.email,
     website: withScheme(form.website),
-    joinedAt: form.joinedAt,
+    // 空串 / 非法值一律 0 —— 界面据此不展示「年龄」那一行
+    age: Number.isFinite(age) && age > 0 ? age : 0,
+    birthday: form.birthday,
+    phone: form.phone.trim(),
     // 正文保持原样：Markdown 对首尾空行敏感，不替用户裁剪。
     detail: form.detail,
   }
@@ -511,13 +546,21 @@ async function saveEditing() {
   saveError.value = ''
   saveNotice.value = ''
 
+  // 记住卡在哪一步，失败时给不同的提示
+  let stage: 'username' | 'readme' | 'profile' = 'username'
+
   try {
-    // 正文走独立接口，而且**只在改动时**才传 ——
-    // README 可能几十 KB，每次保存都重发一遍没有意义。
+    if (next.name !== current.name) {
+      stage = 'username'
+      await uploadUsername(next.name)
+    }
+
     if (form.detail !== current.detail) {
+      stage = 'readme'
       await uploadReadme(form.detail)
     }
 
+    stage = 'profile'
     await uploadProfile(next)
 
     profile.value = next
@@ -525,7 +568,12 @@ async function saveEditing() {
     nameError.value = ''
     saveNotice.value = '资料已保存。'
   } catch (cause) {
-    saveError.value = cause instanceof Error ? cause.message : '保存失败，请重试。'
+    saveError.value =
+      stage === 'username'
+        ? '用户名修改失败：该接口后端尚未开放，资料未保存。'
+        : cause instanceof Error
+          ? cause.message
+          : '保存失败，请重试。'
   } finally {
     isSaving.value = false
   }
@@ -849,7 +897,12 @@ async function load() {
 // 必须监听 id：`/user/a` → `/user/b` 不会重建组件实例。
 watch(userId, load, { immediate: true })
 
-/** 资料区里的元信息行，空字段直接不展示。 */
+/**
+ * 资料区里的元信息行，空字段直接不展示。
+ *
+ * 顺序按「联系方式 → 个人信息 → 只读信息」排，最后三项（加入日期、ID）
+ * 和上面的关注数一样是**只读**的，编辑态不会出现在表单里。
+ */
 const metaItems = computed(() => {
   const current = profile.value
 
@@ -859,12 +912,22 @@ const metaItems = computed(() => {
 
   const items: Array<{ key: string, paths: string[], text: string, href?: string }> = []
 
-  if (current.company !== '') {
-    items.push({ key: 'company', paths: iconBuilding, text: current.company })
+  if (current.email !== '') {
+    items.push({
+      key: 'email',
+      paths: iconMail,
+      text: current.email,
+      href: `mailto:${current.email}`,
+    })
   }
 
-  if (current.location !== '') {
-    items.push({ key: 'location', paths: iconLocation, text: current.location })
+  if (current.phone !== '') {
+    items.push({
+      key: 'phone',
+      paths: iconPhone,
+      text: current.phone,
+      href: `tel:${current.phone}`,
+    })
   }
 
   if (current.website !== '') {
@@ -876,8 +939,21 @@ const metaItems = computed(() => {
     })
   }
 
+  if (current.birthday !== '') {
+    items.push({ key: 'birthday', paths: iconCake, text: `生日 ${current.birthday}` })
+  }
+
+  // 0 表示没填过，不展示（而不是显示「0 岁」）
+  if (current.age > 0) {
+    items.push({ key: 'age', paths: iconUser, text: `${current.age} 岁` })
+  }
+
   if (current.joinedAt !== '') {
-    items.push({ key: 'joined', paths: iconCalendar, text: `Joined ${current.joinedAt}` })
+    items.push({ key: 'joined', paths: iconCalendar, text: `加入于 ${current.joinedAt}` })
+  }
+
+  if (current.id !== '') {
+    items.push({ key: 'id', paths: iconHash, text: `ID ${current.id}` })
   }
 
   return items
@@ -1145,7 +1221,7 @@ const metaItems = computed(() => {
   margin-top: 12px;
 }
 
-/* 显示名顶替标题的位置，和原来的 16px 上间距对齐 */
+/* 用户名输入框顶替标题的位置，和原来的 16px 上间距对齐 */
 .user-page__edit-field--name {
   margin-top: 16px;
 }

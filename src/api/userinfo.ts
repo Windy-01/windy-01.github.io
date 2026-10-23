@@ -67,8 +67,17 @@ export const avatarUploadPath = `${userinfoPrefix}/update/avatar`
 /** 主页正文上传地址（`multipart/form-data`）。 */
 export const readmeUploadPath = `${userinfoPrefix}/update/readme`
 
-/** 资料上传地址（`application/json`，完整对象，**不含头像与正文**）。 */
+/** 资料上传地址（`application/json`，完整对象，**不含身份与只读字段**：id / email / 头像 / 正文 / 用户名）。 */
 export const profileUploadPath = `${userinfoPrefix}/update/profile`
+
+/**
+ * 用户名（`name`）的修改地址。
+ *
+ * ⚠️ 用户名**走独立接口**，不随 `update/profile` 一起提交（也不随 profile 一起返回）。
+ * 这个接口**后端暂缺**（约定见 `docs/api.md`），补上后前端一行不用改；
+ * 路径若与约定不同，只改这一个常量。
+ */
+export const usernameUploadPath = `${userinfoPrefix}/update/username`
 
 /**
  * 头像上传的**表单字段名**。
@@ -168,8 +177,22 @@ export function imageSrcOfRef(ref: FileRef | null): string {
   return resolveImageSrc(ref, normalizeApiBaseUrl(config.apiBaseUrl))
 }
 
-/** 资料里**真正提交**的字段：`avatar` 与 `detail` 各自有独立接口，不在这里。 */
-export type UserProfilePayload = Omit<UserProfile, 'avatar' | 'detail'>
+/**
+ * 资料里**真正提交**的字段。
+ *
+ * 挑出这 5 个而不是 `Omit`，是为了让「资料体到底有哪些字段」一眼可见：
+ * - `avatar` / `detail`：各自有独立的 multipart 接口；
+ * - `name`：走独立的 `update/username`；
+ * - `email` / `login` / `followers` / `following` / `joinedAt`：只读，前端不改。
+ *
+ * ⚠️ **连 `id` 也不发**：这个接口带 `Authorization: Bearer <token>`，
+ * 后端用令牌里的 `sub` 定位用户即可。请求体里再塞一个 id 既冗余又危险 ——
+ * 那是客户端可控的值，后端一旦信它，就能改到别人的资料上。
+ */
+export type UserProfilePayload = Pick<
+  UserProfile,
+  'bio' | 'website' | 'age' | 'birthday' | 'phone'
+>
 
 /**
  * 保存资料。
@@ -179,24 +202,32 @@ export type UserProfilePayload = Omit<UserProfile, 'avatar' | 'detail'>
  * ⚠️ **走 `application/json`**（不是 multipart）：资料是结构化数据，直接发对象即可，
  * 与头像 / 正文这两个「文件」接口不同 —— 那两个才是 `multipart` + 字段 `file`。
  *
- * ⚠️ **不含 `avatar` 与 `detail`**：头像走 `uploadAvatar()`，正文走 `uploadReadme()`。
- * 这里显式挑字段而不是 `delete`，是为了让「资料体到底有哪些字段」一眼可见。
+ * ⚠️ **身份来自令牌，不来自请求体**：不带 `id`（也不带 `avatar` / `detail` / `name` / `email`）。
+ * 后端要「改谁」请看 `Authorization` 里的 `sub`，别读 body。
  */
 export async function uploadProfile(profile: UserProfile): Promise<void> {
   const payload: UserProfilePayload = {
-    id: profile.id,
-    name: profile.name,
-    login: profile.login,
     bio: profile.bio,
-    followers: profile.followers,
-    following: profile.following,
-    company: profile.company,
-    location: profile.location,
     website: profile.website,
-    joinedAt: profile.joinedAt,
+    age: profile.age,
+    birthday: profile.birthday,
+    phone: profile.phone,
   }
 
   await postJson<void>(profileUploadPath, payload)
+}
+
+/**
+ * 修改用户名。
+ *
+ * ⚠️ 与资料分开提交：用户名是登录标识，后端有独立的校验（唯一性、长度、敏感词），
+ * 失败语义也和普通资料字段不同 —— 混在 `update/profile` 里会让「改简介失败」
+ * 和「改名字失败」共用一条错误提示。
+ *
+ * ⚠️ **后端接口暂缺**（见 `docs/api.md`），现在调用会 404。
+ */
+export async function uploadUsername(name: string): Promise<void> {
+  await postJson<void>(usernameUploadPath, { name })
 }
 
 /** 从任意值里取第一个可用的字符串。 */
@@ -291,15 +322,18 @@ export function normalizeProfile(raw: unknown, fallbackId: string): UserProfile 
 
   return {
     id: pickString(record, 'id', 'userId', 'user_id') || fallbackId,
-    name: pickString(record, 'name', 'nickname', 'displayName', 'display_name'),
-    login: pickString(record, 'login', 'username', 'account'),
+    name: pickString(record, 'name', 'username', 'nickname', 'displayName', 'display_name'),
+    login: pickString(record, 'login', 'account', 'handle'),
     avatar: pickImageSrc(record, 'avatar', 'avatarUrl', 'avatar_url'),
     bio: pickString(record, 'bio', 'signature', 'intro'),
+    email: pickString(record, 'email', 'mail'),
+    website: pickString(record, 'website', 'blog', 'homepage', 'site'),
+    // 年龄按数字收：后端给 `"22"` 这种字符串也认，缺失 / 非数字一律 0（界面据此不展示该行）。
+    age: pickNumber(record, 'age'),
+    birthday: pickString(record, 'birthday', 'birth', 'birthDate', 'birth_date'),
+    phone: pickString(record, 'phone', 'telephone', 'tel', 'mobile'),
     followers: pickNumber(record, 'followers', 'followerCount', 'follower_count'),
     following: pickNumber(record, 'following', 'followingCount', 'following_count'),
-    company: pickString(record, 'company'),
-    location: pickString(record, 'location'),
-    website: pickString(record, 'website', 'blog', 'homepage'),
     joinedAt: pickString(record, 'joinedAt', 'joined_at', 'createdAt', 'created_at'),
     detail: pickInlineText(record, 'detail', 'readme', 'content'),
   }

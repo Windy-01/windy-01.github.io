@@ -13,7 +13,7 @@
 | [认证](#认证)     | 3   | ✅ 已接入，真实发请求              |
 | [聊天](#聊天)     | 3   | ⏳ 只预留契约，当前返回本地演示数据 / 未接入 |
 | [文档](#文档)     | 1   | ⏳ 只预留契约，当前读本地静态 markdown |
-| [用户](#用户)     | 7   | 🚧 资料 / 头像 / README 已接 `/userinfo/*`，`/users/me` 仍本地兜底 |
+| [用户](#用户)     | 8   | 🚧 资料 / 头像 / README 已接 `/userinfo/*`，`update/username` 与 `/users/me` 仍待后端 |
 | [帖子统计](#帖子统计) | —   | ❓ 尚未约定路径                 |
 
 ## 网络层约定
@@ -207,10 +207,20 @@
 
 **三个资源各自独立**：资料（JSON）、头像（图片）、README（Markdown 文件）各有自己的读写接口，
 `update/profile` 的请求体里**不含** `avatar` 与 `detail` —— 它们体积大、更新频率也不同，塞进同一个 JSON 里没有好处。
+用户名（`name`）也**不随资料体提交**，走独立的 `update/username`。
 
-`fetchUserProfile(id)` 的回落顺序：**后端资料 → 本地注册表（`dev` 占位用户）→ 已登录用户的默认主页**。
-后端 404（该用户还没资料）和网络不通都会回落，不会变成错误页；只有「后端和注册表都没有」才算用户不存在。
-拿到资料后还会**单独再取一次 README**（取不到就当没有正文，不影响资料本身）。
+**路由只认三种形态**（**不支持用账号名访问**）：
+
+| 路由 | 含义 | 数据来源 |
+| --- | --- | --- |
+| `/user/me` | 当前登录用户 | 先解析出 userid（令牌的 `sub`），再取后端资料；后端没有资料时给一份**默认主页** |
+| `/user/dev` | 本地占位用户 | 前端内置的 `localUsers.dev`，不联网 |
+| `/user/<userid>` | 指定用户 | **只按 userid 请求后端**；取不到就渲染错误态 |
+
+> ⚠️ 以前「后端失败就按 id 查本地注册表」会让任意账号名都能打开一页资料，等于变相支持 username 访问 ——
+> 现在这条回落**已删除**。`/user/<账号名>` 会得到「没有找到 ID 为 xxx 的用户」。
+>
+> 拿到资料后还会**单独再取一次 README**（取不到就当没有正文，不影响资料本身）。
 
 ### 文件字段的三种形态（`src/api/fileRef.ts`）
 
@@ -262,54 +272,81 @@
 
 字段名 camelCase / snake_case 两种都认，缺失字段补空串或 0 —— 不会因为少一个字段就整页报错。
 
-| 字段          | 类型       | 说明                                          |
-| ----------- | -------- | ------------------------------------------- |
-| `id`        | `string` | 用户 id；缺失时用路径参数补                              |
-| `name`      | `string` | 显示名                                         |
-| `login`     | `string` | 登录名（`@handle`）                               |
-| `avatar`    | `string \| object` | 头像：地址、签名链接或 `{ url }` 对象（见上一节）；为空时前端自动拼成 `GET /userinfo/{userid}/avatar` |
-| `bio`       | `string` | 一句话简介                                       |
-| `followers` | `number` | 关注者数量                                       |
-| `following` | `number` | 正在关注的数量                                     |
-| `company`   | `string` | 所属公司；为空则不展示该行                               |
-| `location`  | `string` | 所在地；为空则不展示该行                                |
-| `website`   | `string` | 个人站点；为空则不展示该行                               |
-| `joinedAt`  | `string` | 加入日期，`YYYY-MM-DD`                           |
-| `detail`    | `string \| object` | 主页正文：可内联、也可给地址 / 签名链接（前端会再取一次）；为空时前端单独取 `GET /userinfo/{userid}/readme` |
+字段分两类，**编辑态只允许改「可改」的那些**：
+
+| 字段          | 类型       | 读写 | 说明                                          |
+| ----------- | -------- | -- | ------------------------------------------- |
+| `id`        | `string` | 只读 | userid；缺失时用路径参数补                              |
+| `name`      | `string` | 可改 | 用户名。⚠️ 修改走**独立接口** `update/username`，不随资料体提交 |
+| `login`     | `string` | 只读 | 登录名（`@handle`）                               |
+| `avatar`    | `string \| object` | 独立接口 | 头像：地址、签名链接或 `{ url }` 对象（见上一节）；为空时前端自动拼成 `GET /userinfo/{userid}/avatar` |
+| `bio`       | `string` | 可改 | 一句话简介                                       |
+| `email`     | `string` | 只读 | 邮箱；编辑态不出现，也不随资料体提交                          |
+| `phone`     | `string` | 可改 | 电话                                          |
+| `website`   | `string` | 可改 | 个人站点；为空则不展示该行                               |
+| `birthday`  | `string` | 可改 | 生日，`YYYY-MM-DD`；为空则不展示该行                     |
+| `age`       | `number` | 可改 | 年龄；`0` / 缺失表示没填，不展示该行                       |
+| `followers` | `number` | 只读 | 关注者数量                                       |
+| `following` | `number` | 只读 | 正在关注的数量                                     |
+| `joinedAt`  | `string` | 只读 | 加入日期，`YYYY-MM-DD`                           |
+| `detail`    | `string \| object` | 独立接口 | 主页正文：可内联、也可给地址 / 签名链接（前端会再取一次）；为空时前端单独取 `GET /userinfo/{userid}/readme` |
 
 - 鉴权：`auth: true`
-- 「找不到」返回非 2xx —— 前端会回落到本地兜底，不会显示错误页
+- 「找不到」返回 404 —— `/user/me` 有默认主页兜底；`/user/<userid>` 会渲染错误态
+
+> 展示顺序（前端固定）：简介 → 邮箱 → 电话 → 个人站点 → 生日 → 年龄 → 加入日期 → ID。
+> 空字段（空串 / `age === 0`）不展示对应行。
 
 ### `POST /userinfo/update/profile`
 
 保存资料。**提交完整对象**，不是局部 patch：后端拿到什么就是什么，不需要判断「哪些字段没传」。
 
-**请求体**：`application/json`，10 个**文本**字段
+**请求体**：`application/json`，5 个字段
 
-| 字段          | 类型       |
-| ----------- | -------- |
-| `id`        | `string` |
-| `name`      | `string` |
-| `login`     | `string` |
-| `bio`       | `string` |
-| `followers` | `number` |
-| `following` | `number` |
-| `company`   | `string` |
-| `location`  | `string` |
-| `website`   | `string` |
-| `joinedAt`  | `string` |
+| 字段         | 类型       | 说明                    |
+| ---------- | -------- | --------------------- |
+| `bio`      | `string` | 简介                    |
+| `phone`    | `string` | 电话                    |
+| `website`  | `string` | 个人站点，前端会补全 `https://` |
+| `birthday` | `string` | 生日，`YYYY-MM-DD`       |
+| `age`      | `number` | 年龄；`0` 表示没填           |
 
-> ⚠️ **这个接口是 JSON，不是 multipart**：后端用 `@RequestBody UserProfile profile` 接即可。
+> ⚠️ **请求体里没有 `id`**：改谁由 `Authorization: Bearer <token>` 里的 `sub` 决定。
+> 前端**不会**把 userid 塞进 body —— 那是客户端可控的值，后端一旦读它，就可能被用来改别人的资料。
+> 后端实现时请从令牌取 subject，不要读 body 里的 id。
+
+> ⚠️ **这个接口是 JSON，不是 multipart**：后端用 `@RequestBody` 接一个**只含这 5 个字段的 DTO** 即可
+> （别直接绑 `UserProfile` 实体 —— 那会把 `id` / `followers` 等一起暴露成可写）。
 > 只有 `update/avatar` 与 `update/readme` 是文件上传（`@RequestPart("file") MultipartFile file`）——
 > 两类接口的注解不能混用，`@RequestBody` 接 multipart 会报 `Required request body is missing`。
 
-> ⚠️ **不含 `avatar` 与 `detail`**：头像走 `update/avatar`，正文走 `update/readme`。
-> 前端是**显式挑字段**构造 JSON 的（`UserProfilePayload`），不是把 `UserProfile` 直接序列化 ——
-> 这样「资料体到底有哪些字段」一眼可见，也不会因为给类型加字段就悄悄多发数据。
+> ⚠️ **不含 `avatar` / `detail` / `name` / `email`**：头像走 `update/avatar`，正文走 `update/readme`，
+> 用户名走 `update/username`，邮箱是**只读字段**（后端保留原值）。前端是**显式挑字段**构造 JSON 的（`UserProfilePayload = Pick<...>`），
+> 不是把 `UserProfile` 直接序列化 —— 这样「资料体到底有哪些字段」一眼可见，
+> 也不会因为给类型加字段就悄悄多发数据。
+
+> ⚠️ **只读字段不进请求体**：`id` / `email` / `login` / `followers` / `following` / `joinedAt` 由后端自己维护。
 
 - 鉴权：`auth: true`
 - **响应**：只返回状态码，无响应体（前端按 `void` 处理）
 - ⚠️ 前端只在 2xx 时更新页面；失败会**保留编辑态**并显示错误，让用户重试
+
+### `POST /userinfo/update/username`（⏳ 后端待实现）
+
+修改用户名。与 `update/profile` **分开**：用户名是登录标识，后端通常有独立校验
+（唯一性、长度、敏感词），失败语义也和普通资料字段不同。
+
+**请求体**：`application/json`
+
+```json
+{ "name": "新用户名" }
+```
+
+- 鉴权：`auth: true`
+- **响应**：只返回状态码，无响应体
+- 前端行为：只有用户名**真的改过**才发这个请求；它失败时**不会**继续提交资料（避免「名字没改成功、其他字段改了」的半吊子状态），
+  错误文案会明确提示「该接口后端尚未开放」
+- ⚠️ 路径常量在 `src/api/userinfo.ts` 的 `usernameUploadPath`，与后端约定不一致时只改这一处
 
 ### `POST /userinfo/update/avatar`
 
@@ -395,7 +432,7 @@
 | 字段       | 类型       | 说明                                    |
 | -------- | -------- | ------------------------------------- |
 | `id`     | `string` | 用户 id —— 与令牌里的 `sub` 一致，可直接用于 `userinfo/{userid}/...` |
-| `name`   | `string` | 显示名                                   |
+| `name`   | `string` | 用户名                                   |
 | `login`  | `string` | 登录名（`@handle`）                         |
 | `avatar` | `string` | 头像地址；为空时使用内置占位头像                      |
 
@@ -404,6 +441,9 @@
 > 于是所有已登录用户都有自己的默认主页 —— 资料字段为空、关注数为 0，
 > 没有 README.md 时界面上标注「空」。令牌不是 JWT 时 `id` 回落账号，账号也没有就回落 `me`。
 > 接口就绪后只改 `fetchCurrentUser()` 的函数体，调用方不用动。
+>
+> ⚠️ 注意 `id` 的回落只用于**内部请求**，不构成 username 访问：路由侧只认 `me` / `dev` / userid，
+> `/user/<账号>` 会走「按 userid 取后端资料」并失败。
 
 ---
 
