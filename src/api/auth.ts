@@ -19,7 +19,9 @@
  */
 
 import { postJson, request } from './http'
-import { clearSession, setSession } from './session'
+import { clearIdentity, saveIdentity } from './identity'
+import { clearSession, decodeTokenSubject, setSession } from './session'
+import { fetchRemoteUsername } from './userinfo'
 
 /** 登录参数。 */
 export interface LoginPayload {
@@ -61,8 +63,23 @@ export async function login(payload: LoginPayload): Promise<LoginResult> {
     throw new Error('登录响应里没有可用的 token，无法保存登录状态。')
   }
 
-  // 顺手把账号记进会话：用户资料接口还没接入，界面靠它区分「登录的是哪个用户」。
+  // 先存会话：下面取用户名要带令牌，通信层是从会话里拿的。
   setSession({ token, tokenType: result.token_type, account: payload.account })
+
+  // 身份 cookie：`userid` 从令牌的 `sub` 解，`account` 就是这次填的账号，
+  // `username` 只有独立接口能给 —— 多问一次，失败就留空（顶栏回落到账号）。
+  const userid = decodeTokenSubject(token)
+  let username = ''
+
+  if (userid !== '') {
+    try {
+      username = await fetchRemoteUsername(userid)
+    } catch {
+      // 非致命：顶栏还有账号可显示，下次打开主页会再试。
+    }
+  }
+
+  saveIdentity({ username, account: payload.account.trim(), userid })
 
   return result
 }
@@ -95,5 +112,7 @@ export async function logout(): Promise<void> {
     // 故意吞掉：结果不参与判断，见上方说明。
   } finally {
     clearSession()
+    // 身份 cookie 也一起清：留着会让顶栏显示上一个账号的名字。
+    clearIdentity()
   }
 }

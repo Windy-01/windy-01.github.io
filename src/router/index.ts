@@ -2,7 +2,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { defaultDocumentId } from '../api/documents'
 import { isLoggedIn } from '../api/session'
-import { currentUserId } from '../api/users'
 
 /**
  * 页面组件一律用**动态 `import()`**：每个页面单独打成一个 chunk，
@@ -48,9 +47,16 @@ const router = createRouter({
       path: '/chat',
       component: () => import('../views/chat.vue'),
     },
+    // `/user` 是**作者展示页**（本地静态资料，不联网）；`/user/{account}` 才是某个用户的主页。
+    // ⚠️ 用登录账号当路径参数：它不可改、唯一；username 可改，改完 URL 不该跟着变。
     {
       name: 'user',
-      path: '/user/:id',
+      path: '/user',
+      component: () => import('../views/user.vue'),
+    },
+    {
+      name: 'user-profile',
+      path: '/user/:account',
       component: () => import('../views/user.vue'),
     },
     // 认证相关：目前只有界面，接口见 `src/api/auth.ts`（占位，尚未接入后端）。
@@ -73,19 +79,14 @@ const router = createRouter({
 })
 
 /**
- * 需要登录态的两个入口：
+ * 需要登录态的入口：只有 `/logout`（未登录时点下去什么也不会发生，直接引导去登录页）。
  *
- * - `/logout`：未登录时点下去什么也不会发生，直接引导去登录页。
- * - `/user/me`：「当前登录用户」的保留 id，未登录时没有可解析的对象。
- *
- * `/login` `/register` 不加限制：已经登录的人也可能想换个账号，不该被弹走。
+ * ⚠️ **`/user` 与 `/user/{account}` 都不拦**：作者页本来就给未登录的人看，
+ * 别人的主页也不需要登录（和 GitHub 一致）。
+ * `/login` `/register` 同样不加限制：已经登录的人也可能想换个账号。
  */
 router.beforeEach((to) => {
   if (to.name === 'logout' && !isLoggedIn()) {
-    return { name: 'login' }
-  }
-
-  if (to.name === 'user' && to.params.id === currentUserId && !isLoggedIn()) {
     return { name: 'login' }
   }
 

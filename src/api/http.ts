@@ -13,6 +13,7 @@
  */
 
 import { normalizeApiBaseUrl, useConfig } from '../config'
+import { clearIdentity } from './identity'
 import { clearSession, getAuthorizationHeader } from './session'
 
 /**
@@ -46,6 +47,13 @@ export interface RequestOptions {
    *   `boundary` 必须由浏览器自己生成，手写会漏掉它导致后端解析失败。
    */
   body?: unknown
+  /**
+   * 纯文本请求体（`text/plain;charset=UTF-8`），与 `body` 互斥且优先。
+   *
+   * 只给「后端用 `@RequestBody String` 接」的接口用（例如 `update/username`）：
+   * 那种签名会把 body **原样**当值存下去，发 JSON 会把整段 `{"name":"x"}` 存进数据库。
+   */
+  textBody?: string
   query?: QueryParams
   /** 用于取消请求；被取消时原样抛出 `AbortError`，不包装成 `ApiError`。 */
   signal?: AbortSignal
@@ -150,7 +158,7 @@ async function readBody(response: Response): Promise<unknown> {
  * - 请求没能发出（断网 / 服务未启动）：抛 `ApiError`，`status` 为 `0`。
  */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, query, signal, auth = true } = options
+  const { method = 'GET', body, textBody, query, signal, auth = true } = options
   const headers: Record<string, string> = { Accept: 'application/json' }
   let payload: BodyInit | undefined
 
@@ -162,7 +170,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
 
-  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+  if (textBody !== undefined) {
+    // 纯文本：`@RequestBody String` 的后端拿到的就是这段字面量。
+    headers['Content-Type'] = 'text/plain;charset=UTF-8'
+    payload = textBody
+  } else if (typeof FormData !== 'undefined' && body instanceof FormData) {
     // multipart：**不要**手动设 Content-Type，浏览器会自动补上带 boundary 的那一份。
     payload = body
   } else if (body !== undefined) {
@@ -186,10 +198,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   if (!response.ok) {
     // 令牌失效：带鉴权的请求仍收到 401，说明本地令牌已经不可用（过期 / 被吊销），
-    // 直接清掉会话，界面随之回到未登录，避免顶栏一直显示「已登录」却什么也做不了。
+    // 直接清掉会话与身份缓存，界面随之回到未登录，避免顶栏一直显示「已登录」却什么也做不了。
     // 登录 / 注册是 `auth: false`，它们返回 401（账号密码错误）时不会走到这里。
     if (response.status === 401 && auth) {
       clearSession()
+      clearIdentity()
     }
 
     throw new ApiError(
@@ -214,9 +227,23 @@ export function getJson<T>(
 export function postJson<T>(
   path: string,
   body?: unknown,
-  options: Omit<RequestOptions, 'method' | 'body'> = {},
+  options: Omit<RequestOptions, 'method' | 'body' | 'textBody'> = {},
 ): Promise<T> {
   return request<T>(path, { ...options, method: 'POST', body })
+}
+
+/**
+ * POST 纯文本（`text/plain;charset=UTF-8`）。
+ *
+ * 给「后端 `@RequestBody String`」那类接口用 —— 它把 body 原样当值，
+ * 用 `postJson` 会把 `{"name":"x"}` 整段存进去。
+ */
+export function postText<T>(
+  path: string,
+  text: string,
+  options: Omit<RequestOptions, 'method' | 'body' | 'textBody'> = {},
+): Promise<T> {
+  return request<T>(path, { ...options, method: 'POST', textBody: text })
 }
 
 /**

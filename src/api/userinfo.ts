@@ -43,7 +43,7 @@ import {
   resolveImageSrc,
   type FileRef,
 } from './fileRef'
-import { getJson, postForm, postJson } from './http'
+import { getJson, postForm, postJson, postText } from './http'
 import type { UserProfile } from './users'
 
 /**
@@ -74,8 +74,8 @@ export const profileUploadPath = `${userinfoPrefix}/update/profile`
  * 用户名（`name`）的修改地址。
  *
  * ⚠️ 用户名**走独立接口**，不随 `update/profile` 一起提交（也不随 profile 一起返回）。
- * 这个接口**后端暂缺**（约定见 `docs/api.md`），补上后前端一行不用改；
- * 路径若与约定不同，只改这一个常量。
+ * ⚠️ **请求体是纯文本**（后端 `@RequestBody String username`），不是 JSON —— 见 `uploadUsername()`。
+ * 路径若与后端不同，只改这一个常量。
  */
 export const usernameUploadPath = `${userinfoPrefix}/update/username`
 
@@ -103,6 +103,27 @@ export function readmePathOf(userId: string): string {
 /** 资料接口路径（相对路径）。 */
 export function profilePathOf(userId: string): string {
   return `${userinfoPrefix}/${encodeURIComponent(userId)}/profile`
+}
+
+/**
+ * 用户名接口路径（相对路径）。
+ *
+ * ⚠️ **用户名不随 `profile` 返回**：资料接口只给 `bio` / `age` / `birthday` / `phone` / `website`，
+ * 用户名走这个独立接口。少了这一趟，主页标题与 `@handle` 就会是空的
+ * （联通真后端后出现过，因为 mock 当时把 `name` / `login` 塞进了 profile，把问题盖住了）。
+ */
+export function usernamePathOf(userId: string): string {
+  return `${userinfoPrefix}/${encodeURIComponent(userId)}/username`
+}
+
+/**
+ * 「按账号查 userid」的路径（相对路径）。
+ *
+ * 主页路由用的是**登录账号**（`/user/{account}`），而其余接口认的是 userid，
+ * 所以进页面第一件事是拿它换 id。后端返回裸数字，查不到时是 200 + 空响应体。
+ */
+export function useridPathOf(account: string): string {
+  return `${userinfoPrefix}/${encodeURIComponent(account)}/id`
 }
 
 /**
@@ -224,18 +245,26 @@ export async function uploadProfile(profile: UserProfile): Promise<void> {
  * 失败语义也和普通资料字段不同 —— 混在 `update/profile` 里会让「改简介失败」
  * 和「改名字失败」共用一条错误提示。
  *
- * ⚠️ **后端接口暂缺**（见 `docs/api.md`），现在调用会 404。
+ * ⚠️ **请求体是纯文本，不是 JSON**：后端签名是 `@RequestBody String username`，
+ * 它把 body **原样**当用户名存下去。发 `{ "name": "..." }` 会存成一整段 JSON
+ * （而且 Jackson 也可能直接 400）。所以这里走 `postText()`，body 就是名字本身。
  */
 export async function uploadUsername(name: string): Promise<void> {
-  await postJson<void>(usernameUploadPath, { name })
+  await postText<void>(usernameUploadPath, name.trim())
 }
 
-/** 从任意值里取第一个可用的字符串。 */
+/**
+ * 从任意值里取第一个可用的字符串。
+ *
+ * ⚠️ **空串算「没有」**：后端经常把未填的列序列化成 `""` 而不是省略字段，
+ * 若让 `""` 占住第一个键，后面真正有值的别名就永远取不到了
+ * （`{ name: "", username: "windy" }` 会得到空名字）。
+ */
 function pickString(record: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
     const value = record[key]
 
-    if (typeof value === 'string') {
+    if (typeof value === 'string' && value.trim() !== '') {
       return value
     }
 
@@ -349,6 +378,71 @@ export async function fetchRemoteProfile(userId: string): Promise<UserProfile> {
   const raw = await getJson<unknown>(profilePathOf(userId))
 
   return normalizeProfile(raw, userId)
+}
+
+/**
+ * 取用户名（`GET /userinfo/{userid}/username`）。
+ *
+ * 后端**只回一个字段**：
+ *
+ * ```json
+ * { "username": "windyfront" }
+ * ```
+ *
+ * ⚠️ **只认 `username`**，不做别名猜测（`name` / `userid` 之类一概不认）：
+ * 接口就这一个字段，多写几层兜底反而会把「后端字段写错了」这种问题悄悄盖住。
+ * 字段缺失 / 类型不对 / 非对象一律返回空串，界面回落到「未命名用户」。
+ *
+ * ⚠️ **用户名不随 `profile` 返回**，主页标题与顶栏都靠这一趟。
+ *
+ * @throws 接口不可达 / 非 2xx 时抛 `ApiError`，由调用方决定是否忽略（取不到不算致命）。
+ */
+export async function fetchRemoteUsername(
+  userId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const raw = await getJson<unknown>(usernamePathOf(userId), { signal })
+
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return ''
+  }
+
+  const value = (raw as Record<string, unknown>).username
+
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+/**
+ * 按**登录账号**查 userid（`GET /userinfo/{account}/id`）。
+ *
+ * 后端返回的是一个**裸数字**（`10086`），不是对象；查不到时是 200 + 空响应体
+ * （`Long` 为 `null`），所以这里返回空串表示「没有这个账号」。
+ *
+ * ⚠️ 后端的 SQL 是 `WHERE account = ? OR email = ?`，所以邮箱也能命中 ——
+ * 用邮箱登录的用户拿邮箱当 `account` 打开主页同样能用。
+ *
+ * @throws 接口不可达 / 非 2xx 时抛 `ApiError`。
+ */
+export async function fetchRemoteUserid(
+  account: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const raw = await getJson<unknown>(useridPathOf(account), { signal })
+
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return String(raw)
+  }
+
+  if (typeof raw === 'string') {
+    return raw.trim()
+  }
+
+  // 空响应（`undefined`）/ `{ id }` 形态都认一下，别因为形状变了就整页报错。
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    return pickString(raw as Record<string, unknown>, 'id', 'userid', 'userId')
+  }
+
+  return ''
 }
 
 /**

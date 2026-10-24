@@ -1,7 +1,7 @@
 <template>
   <AuthCard
     title="退出登录"
-    hint="退出接口已按后端契约接好，服务端尚未就绪。"
+    hint="退出后会同时清除本地令牌与身份缓存（用户名 / 账号 / userid）。"
   >
     <p class="auth-note">
       点击按钮会带着当前的 <code>Authorization: Bearer</code> 令牌请求 <code>GET /logout</code>

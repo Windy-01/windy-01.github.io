@@ -71,10 +71,12 @@
             :aria-invalid="nameError !== ''"
           >
         </label>
-        <h1 v-else class="user-page__name">{{ profile.name }}</h1>
+        <h1 v-else class="user-page__name">{{ profile.name || '未命名用户' }}</h1>
         <p v-if="nameError !== ''" class="user-page__edit-error" role="alert">{{ nameError }}</p>
 
-        <p class="user-page__login">@{{ profile.login }}</p>
+        <!-- 账号（@handle）：后端没有公开接口，自己的主页用本地会话里的登录账号兜底。
+             取不到就整行不渲染 —— 只留一个孤零零的 @ 比不显示更难看。 -->
+        <p v-if="profile.login !== ''" class="user-page__login">@{{ profile.login }}</p>
 
         <label v-if="isEditing" class="user-page__edit-field">
           <span class="user-page__edit-label">一句话简介</span>
@@ -321,16 +323,16 @@ import AvatarCropper from '../components/common/AvatarCropper.vue'
 import MarkdownView from '../components/common/MarkdownView.vue'
 import DocumentMain from '../components/layout/DocumentMain.vue'
 import { loggedIn } from '../api/session'
+import { currentUserid, saveIdentity } from '../api/identity'
 import {
   avatarUrlOf,
-  fetchRemoteReadme,
   imageSrcOfRef,
   uploadAvatar,
   uploadProfile,
   uploadReadme,
   uploadUsername,
 } from '../api/userinfo'
-import { createDefaultProfile, currentUserId, fetchCurrentUser, fetchUserProfile } from '../api/users'
+import { fetchAuthorProfile, fetchUserProfile } from '../api/users'
 import type { UserProfile } from '../api/users'
 
 /** 资料区里的小图标，用 feather 风格的描边路径。 */
@@ -367,7 +369,14 @@ const iconHash = [
 ]
 
 const route = useRoute()
-const userId = computed(() => String(route.params.id ?? ''))
+
+/**
+ * 路由里的**账号**（`/user/{account}`）；`/user`（作者展示页）时是空串。
+ *
+ * ⚠️ 是登录账号（`useroauth.account`），不是 userid 也不是 username：
+ * account 不可改、唯一，username 改了 URL 不该跟着变。
+ */
+const account = computed(() => String(route.params.account ?? '').trim())
 
 const profile = ref<UserProfile | null>(null)
 const loading = ref(true)
@@ -441,7 +450,8 @@ const displayName = computed(() => {
     return typed
   }
 
-  return profile.value?.name ?? ''
+  // 名字可能为空（用户名接口没取到）：标题里给个占位，别变成「 / README.md」。
+  return profile.value?.name || '未命名用户'
 })
 
 /** 补全协议：只填 `example.com` 时也能点开，而不是变成站内相对路径。 */
@@ -563,14 +573,20 @@ async function saveEditing() {
     stage = 'profile'
     await uploadProfile(next)
 
+    // 用户名改成功了：身份 cookie 里的缓存要跟着变，否则顶栏还挂着旧名字。
+    if (next.name !== current.name) {
+      saveIdentity({ username: next.name })
+    }
+
     profile.value = next
     isEditing.value = false
     nameError.value = ''
     saveNotice.value = '资料已保存。'
   } catch (cause) {
+    // 用户名那一步失败时给专门的提示：它没成功，后面的资料就不会提交（避免半吊子状态）。
     saveError.value =
       stage === 'username'
-        ? '用户名修改失败：该接口后端尚未开放，资料未保存。'
+        ? `用户名修改失败，资料未保存：${cause instanceof Error ? cause.message : '请稍后重试。'}`
         : cause instanceof Error
           ? cause.message
           : '保存失败，请重试。'
@@ -770,29 +786,24 @@ watch(form, () => {
 }, { deep: true })
 
 /**
- * 当前登录用户的 id（`fetchCurrentUser()` 的 `id`，即令牌里的 `sub`）；未登录 / 取不到时为空串。
+ * 当前登录用户的 userid（令牌里的 `sub`，cookie 里有缓存则优先用令牌）；未登录时为空串。
  *
- * 只用来判断「这一页是不是我自己的」，与路由参数无关 —— 顶栏链接指向 `/user/me`，
- * 但用户也可能直接打开 `/user/<自己的 id>`。
+ * 只用来判断「这一页是不是我自己的」，与路由参数无关 ——
+ * 用户可能用 `/user/{自己的账号}`，也可能用邮箱当账号打开。
  */
-const myUserId = ref('')
+const myUserId = computed(() => (loggedIn.value ? currentUserid() : ''))
 
 /**
  * 这一页是不是**我自己的**主页。
  *
- * 三个条件缺一不可：已登录、资料已经加载出来（加载中 / 错误态都不显示按钮）、
- * 且这一页确实指向我 —— 保留 id `/user/me`，或资料 id 与令牌里的 subject 一致。
- * 别人的主页永远不显示「编辑」。
+ * 两个条件缺一不可：已登录、资料已经加载出来（加载中 / 错误态都不显示按钮），
+ * 且资料的 userid 与自己的 userid 一致。别人的主页、作者页永远不显示「编辑」。
  */
 const isOwnProfile = computed(() => {
   const current = profile.value
 
   if (current === null || !loggedIn.value) {
     return false
-  }
-
-  if (userId.value === currentUserId) {
-    return true
   }
 
   return myUserId.value !== '' && current.id === myUserId.value
@@ -805,13 +816,12 @@ const isOwnProfile = computed(() => {
 let requestToken = 0
 
 async function load() {
-  const id = userId.value
+  const key = account.value
   const token = ++requestToken
 
   loading.value = true
   error.value = ''
   profile.value = null
-  myUserId.value = ''
   isEditing.value = false
   nameError.value = ''
   avatarError.value = ''
@@ -820,67 +830,19 @@ async function load() {
   saveNotice.value = ''
 
   try {
-    // `/user/me` 是「当前登录用户」的保留 id：先解析成真实用户，再拉资料。
-    if (id === currentUserId) {
-      const me = await fetchCurrentUser()
-
-      if (token !== requestToken) {
-        return
-      }
-
-      // 守卫会拦住未登录访问，这里只兜底「会话在加载途中失效」。
-      if (me === null) {
-        error.value = '登录状态已失效，请重新登录。'
-        return
-      }
-
-      myUserId.value = me.id
-
-      try {
-        const result = await fetchUserProfile(me.id)
-
-        if (token === requestToken) {
-          profile.value = result
-        }
-      } catch {
-        // 后端还没有这个用户的资料：给一份**默认主页**（字段为空、计数为 0），
-        // 而不是错误页或空状态 —— 所有已登录用户都应该有自己的主页。
-        const fallback = createDefaultProfile(me)
-
-        // ⚠️ 资料 404 不代表没有正文：README 是独立资源，这里单独再取一次。
-        // 不取的话，用户明明传过 README，主页上却一直标着「空」。
-        try {
-          fallback.detail = await fetchRemoteReadme(me.id)
-        } catch {
-          // 没有正文（404 / 网络不通）就保持空串。
-        }
-
-        if (token === requestToken) {
-          profile.value = fallback
-        }
-      }
-
+    // `/user`（无参数）= 作者展示页：读本地静态资料，**不联网**。
+    // 未登录的人也该看得到「这站是谁做的」，后端挂了也不该变空白页。
+    if (key === '') {
+      profile.value = fetchAuthorProfile()
       return
     }
 
-    // 别人的主页：也记下自己的 id，用来判断「编辑主页」按钮要不要出现。
-    if (loggedIn.value) {
-      const me = await fetchCurrentUser()
+    // `/user/{account}`：account → userid → 资料 + 用户名 + 头像 + 正文。
+    const result = await fetchUserProfile(key)
 
-      if (token !== requestToken) {
-        return
-      }
-
-      myUserId.value = me?.id ?? ''
+    if (token === requestToken) {
+      profile.value = result
     }
-
-    const result = await fetchUserProfile(id)
-
-    if (token !== requestToken) {
-      return
-    }
-
-    profile.value = result
   } catch (cause) {
     if (token !== requestToken) {
       return
@@ -894,8 +856,8 @@ async function load() {
   }
 }
 
-// 必须监听 id：`/user/a` → `/user/b` 不会重建组件实例。
-watch(userId, load, { immediate: true })
+// 必须监听账号：`/user/a` → `/user/b` 不会重建组件实例。
+watch(account, load, { immediate: true })
 
 /**
  * 资料区里的元信息行，空字段直接不展示。

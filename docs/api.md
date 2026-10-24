@@ -13,7 +13,7 @@
 | [认证](#认证)     | 3   | ✅ 已接入，真实发请求              |
 | [聊天](#聊天)     | 3   | ⏳ 只预留契约，当前返回本地演示数据 / 未接入 |
 | [文档](#文档)     | 1   | ⏳ 只预留契约，当前读本地静态 markdown |
-| [用户](#用户)     | 8   | 🚧 资料 / 头像 / README 已接 `/userinfo/*`，`update/username` 与 `/users/me` 仍待后端 |
+| [用户](#用户)     | 9   | 🚧 资料 / 头像 / README / 用户名读取 / 按账号查 id 已接；`update/username` 请求体形状待对齐，`/users/me` 暂不需要 |
 | [帖子统计](#帖子统计) | —   | ❓ 尚未约定路径                 |
 
 ## 网络层约定
@@ -37,11 +37,14 @@
 - 公开接口（登录 / 注册）显式传 `auth: false`。
 - ⚠️ 带上该请求头会触发 **CORS 预检**，后端必须放行 `Authorization`。
 - ⚠️ **带鉴权的请求收到 401 会自动清掉本地会话**（`auth: false` 的登录 / 注册不受影响），界面随之回到未登录。
-- 会话结构 `{ token, tokenType, account }`。其中 `account` 是**前端本地记录**（登录时填的账号），用于在 `GET /users/me` 接入前派生当前用户的临时资料与默认主页，后端无需感知。
+- 会话结构 `{ token, tokenType, account }`。其中 `account` 是**前端本地记录**（登录时填的账号），
+  登录成功后会连同 `username` / `userid` 一起写进身份 cookie `windy-identity`（见「用户」一节）。
 
 **编解码与错误**
 
 - 请求体传对象会自动 JSON 序列化并带上 `Content-Type: application/json`；响应体自动按 JSON 解析。
+- **纯文本接口走 `postText()`**：body 是字符串本身、`Content-Type: text/plain;charset=UTF-8`。
+  给后端 `@RequestBody String` 那类签名用（如 `update/username`）—— 用 `postJson` 会把整段 JSON 当值存进去。
 - **文件上传统一走 `postForm()`**：请求体是 `FormData` 时**不设置** `Content-Type` —— multipart 的 `boundary` 必须由浏览器生成，手写会漏掉它，后端直接解析失败。
 - 非 2xx 与「请求根本没发出去」统一抛 `ApiError { status, body }`，`message` 可直接展示给用户。
 - `status === 0` 表示请求根本没发出去（断网 / 服务未启动 / 跨域被拦）。
@@ -202,25 +205,47 @@
 
 分成两层：
 
-- `src/api/users.ts` —— **数据源入口**。对外只暴露 `fetchUserProfile(id)` / `fetchCurrentUser()`，组件不关心数据从哪来。
+- `src/api/users.ts` —— **数据源入口**。对外只暴露 `fetchUserProfile(account)` / `fetchAuthorProfile()` / `fetchCurrentUser()`，组件不关心数据从哪来。
 - `src/userinfo.ts` —— `/userinfo/*` 这组接口的传输层，负责头像、README 与资料的读写。
+- `src/identity.ts` —— 身份缓存（cookie `windy-identity`：`username` / `account` / `userid`）。
 
 **三个资源各自独立**：资料（JSON）、头像（图片）、README（Markdown 文件）各有自己的读写接口，
 `update/profile` 的请求体里**不含** `avatar` 与 `detail` —— 它们体积大、更新频率也不同，塞进同一个 JSON 里没有好处。
 用户名（`name`）也**不随资料体提交**，走独立的 `update/username`。
 
-**路由只认三种形态**（**不支持用账号名访问**）：
+**路由只有两种形态**（用**登录账号**当路径参数）：
 
-| 路由 | 含义 | 数据来源 |
-| --- | --- | --- |
-| `/user/me` | 当前登录用户 | 先解析出 userid（令牌的 `sub`），再取后端资料；后端没有资料时给一份**默认主页** |
-| `/user/dev` | 本地占位用户 | 前端内置的 `localUsers.dev`，不联网 |
-| `/user/<userid>` | 指定用户 | **只按 userid 请求后端**；取不到就渲染错误态 |
+| 路由                | 含义     | 数据来源                                                     |
+| ----------------- | ------ | -------------------------------------------------------- |
+| `/user`           | 作者展示页  | **本地静态**（`users.ts` 的 `authorProfile`），不联网；已登录也不出「编辑主页」 |
+| `/user/{account}` | 某个用户主页 | `GET /{account}/id` 换 userid → `profile` + `username` + 头像 + README |
 
-> ⚠️ 以前「后端失败就按 id 查本地注册表」会让任意账号名都能打开一页资料，等于变相支持 username 访问 ——
-> 现在这条回落**已删除**。`/user/<账号名>` 会得到「没有找到 ID 为 xxx 的用户」。
+> ⚠️ **用 account 而不是 userid / username**：account 是登录账号（`useroauth.account`），不可改、唯一；
+> username 是显示名，可改 —— 改完名字 URL 不该跟着变。
 >
-> 拿到资料后还会**单独再取一次 README**（取不到就当没有正文，不影响资料本身）。
+> ⚠️ 后端的 SQL 是 `WHERE account = ? OR email = ?`，所以**邮箱也能当 account 用**
+> （用邮箱登录的用户拿邮箱打开自己的主页同样能命中）。
+>
+> ⚠️ `/user/me` 与 `/user/dev` **已删除**：前者靠保留 id 解析当前用户，与 account 路由冲突；
+> 后者被 `/user`（作者页）取代。
+
+拿到 userid 后还会**单独再取一次 README**（取不到就当没有正文，不影响资料本身）。
+
+### 身份缓存 cookie `windy-identity`
+
+登录成功后写入，退出登录 / 收到 401 时清除；改完用户名也会同步一次。
+
+```json
+{ "username": "windyfront", "account": "windyfront", "userid": "10086" }
+```
+
+- 为什么缓存：`username` 只有一个独立接口（顶栏每页都要显示，不该每次都打）；
+  `account` 后端**没有读接口**，只能记登录时填的值；`userid` 就是令牌 `sub`，缓存省一次解 JWT。
+- ⚠️ **是缓存不是权威**：`userid` 与令牌 `sub` 不一致时**以令牌为准**（`identity.ts` 的 `currentUserid()`）。
+- ⚠️ **`username` 以每次 GET 的结果为准**：顶栏挂载时主动取一次、打开自己的主页时也取一次，
+  拿到就写回这份缓存（`saveIdentity()` 在值没变时是空操作，不会触发 `watch(identity)` 循环）。
+- ⚠️ 不复用 `windy-settings`：那是站点设置，`resetConfig()` 会整份重置，身份数据混进去会被误清。
+
 
 ### 文件字段的三种形态（`src/api/fileRef.ts`）
 
@@ -253,6 +278,29 @@
 > ⚠️ **路径里的 `avatar` 是按正确拼写写的**：需求原稿给的是 `avator`（少一个 `a`），经确认按拼写错误处理。
 > 若后端实际保留 `avator`，只改 `src/userinfo.ts` 顶部的路径常量，调用方一行不用动。
 
+### `GET /userinfo/:account/id`
+
+**按登录账号查 userid**。主页路由是 `/user/{account}`，而其余接口认的是 userid，
+所以进页面第一件事就是拿它换 id。
+
+**响应体**：**裸数字**，不是对象
+
+```json
+10086
+```
+
+| 情况      | 响应                                    |
+| ------- | ------------------------------------- |
+| 查到      | `200` + `10086`                       |
+| 查不到     | `200` + **空响应体**（后端 `Long` 为 `null`） |
+| 账号非法 / 网络 | 非 2xx（前端按错误处理）                       |
+
+> ⚠️ 后端 SQL 是 `WHERE account = ? OR email = ?`，所以**邮箱也能命中**。
+> 前端两种都能用：拿邮箱打开 `/user/windy@example.com` 一样能进到主页。
+>
+> ⚠️ 「查不到」返回 **200 + 空体**，前端按空串处理并渲染「没有找到账号为 xxx 的用户」。
+> 如果后端愿意改成 404，前端同样认（`fetchUserProfile()` 里 404 与空体走同一条分支）。
+
 ### `GET /userinfo/:userid/profile`
 
 按 id 拉取用户资料。
@@ -276,26 +324,51 @@
 
 | 字段          | 类型       | 读写 | 说明                                          |
 | ----------- | -------- | -- | ------------------------------------------- |
-| `id`        | `string` | 只读 | userid；缺失时用路径参数补                              |
-| `name`      | `string` | 可改 | 用户名。⚠️ 修改走**独立接口** `update/username`，不随资料体提交 |
-| `login`     | `string` | 只读 | 登录名（`@handle`）                               |
+| `id`        | `string` | 只读 | userid；后端不返回，前端用 `GET /{account}/id` 的结果补     |
+| `name`      | `string` | 可改 | 用户名。⚠️ 后端**不在这里返回**，走 `GET /{userid}/username`；修改走 `update/username` |
+| `login`     | `string` | 只读 | 登录账号（`@handle`）；后端不返回，前端直接用 URL 里的 `account` |
 | `avatar`    | `string \| object` | 独立接口 | 头像：地址、签名链接或 `{ url }` 对象（见上一节）；为空时前端自动拼成 `GET /userinfo/{userid}/avatar` |
 | `bio`       | `string` | 可改 | 一句话简介                                       |
-| `email`     | `string` | 只读 | 邮箱；编辑态不出现，也不随资料体提交                          |
+| `email`     | `string` | 只读 | 邮箱；⚠️ 后端暂无来源，编辑态不出现，也不随资料体提交               |
 | `phone`     | `string` | 可改 | 电话                                          |
 | `website`   | `string` | 可改 | 个人站点；为空则不展示该行                               |
 | `birthday`  | `string` | 可改 | 生日，`YYYY-MM-DD`；为空则不展示该行                     |
 | `age`       | `number` | 可改 | 年龄；`0` / 缺失表示没填，不展示该行                       |
-| `followers` | `number` | 只读 | 关注者数量                                       |
-| `following` | `number` | 只读 | 正在关注的数量                                     |
-| `joinedAt`  | `string` | 只读 | 加入日期，`YYYY-MM-DD`                           |
+| `followers` | `number` | 只读 | 关注者数量；⚠️ 后端暂无来源，恒为 0                        |
+| `following` | `number` | 只读 | 正在关注的数量；⚠️ 同上                               |
+| `joinedAt`  | `string` | 只读 | 加入日期，`YYYY-MM-DD`；⚠️ 后端暂无来源，不展示该行           |
 | `detail`    | `string \| object` | 独立接口 | 主页正文：可内联、也可给地址 / 签名链接（前端会再取一次）；为空时前端单独取 `GET /userinfo/{userid}/readme` |
 
 - 鉴权：`auth: true`
-- 「找不到」返回 404 —— `/user/me` 有默认主页兜底；`/user/<userid>` 会渲染错误态
+- 「找不到」返回 404 —— 由 `GET /{account}/id` 那一趟先拦住，这里 404 会渲染错误态
 
 > 展示顺序（前端固定）：简介 → 邮箱 → 电话 → 个人站点 → 生日 → 年龄 → 加入日期 → ID。
 > 空字段（空串 / `age === 0`）不展示对应行。
+
+> ⚠️ **后端目前只返回 `bio` / `age` / `birthday` / `phone` / `website` 五个字段**（`OAuth2Server` 的 `ProfileRequest`）。
+> 其余字段前端一律按「缺失即空」处理：`id` 来自 `/{account}/id`，`login` 来自 URL 里的 account，
+> `name` 来自 `/{userid}/username`，`avatar` / `detail` 各走独立接口，
+> `email` / `followers` / `following` / `joinedAt` 目前**没有来源**（不展示 / 显示 0）。
+
+### `GET /userinfo/:userid/username`
+
+用户名。**用户名不随 `profile` 返回**，主页标题与顶栏都靠这一趟 ——
+少调它，标题就是空的（联通真后端后踩过）。
+
+**响应体**：只回用户名，没有别的字段
+
+```json
+{ "username": "windyfront" }
+```
+
+- 鉴权：`auth: true`
+- ⚠️ **前端只认 `username` 这一个键**，不做别名猜测（`name` / `userid` 之类一概不认）：
+  字段写错时标题会回落到「未命名用户」，问题能立刻暴露，不会被兜底悄悄盖住
+- **每次 GET 都会刷新顶栏**：顶栏挂载时主动取一次（不等 cookie 过期），
+  打开自己的主页时那一次 GET 也会写回身份缓存 —— 别处改过名字，刷新就能纠正
+- ⚠️ **不要把 `account` / `email` 塞进这个接口**：账号就是 URL 里那一段（前端直接用），
+  邮箱另有安排。接口保持单一职责，少一层耦合
+
 
 ### `POST /userinfo/update/profile`
 
@@ -331,22 +404,24 @@
 - **响应**：只返回状态码，无响应体（前端按 `void` 处理）
 - ⚠️ 前端只在 2xx 时更新页面；失败会**保留编辑态**并显示错误，让用户重试
 
-### `POST /userinfo/update/username`（⏳ 后端待实现）
+### `POST /userinfo/update/username`
 
 修改用户名。与 `update/profile` **分开**：用户名是登录标识，后端通常有独立校验
 （唯一性、长度、敏感词），失败语义也和普通资料字段不同。
 
-**请求体**：`application/json`
+**请求体**：**纯文本**（`Content-Type: text/plain;charset=UTF-8`），body 就是名字本身
 
-```json
-{ "name": "新用户名" }
+```text
+新用户名
 ```
 
+- 后端签名是 `@RequestBody String username` —— 它把 body **原样**当值存下去。
+  ⚠️ 所以**不能发 JSON**：`{ "name": "新用户名" }` 会被整段存成用户名（Jackson 也可能直接 400）
 - 鉴权：`auth: true`
 - **响应**：只返回状态码，无响应体
-- 前端行为：只有用户名**真的改过**才发这个请求；它失败时**不会**继续提交资料（避免「名字没改成功、其他字段改了」的半吊子状态），
-  错误文案会明确提示「该接口后端尚未开放」
-- ⚠️ 路径常量在 `src/api/userinfo.ts` 的 `usernameUploadPath`，与后端约定不一致时只改这一处
+- 前端行为：只有用户名**真的改过**才发这个请求；它失败时**不会**继续提交资料（避免「名字没改成功、其他字段改了」的半吊子状态）
+- 成功后前端会把新名字写回身份缓存（`windy-identity`），顶栏立即更新
+- ⚠️ 路径常量在 `src/api/userinfo.ts` 的 `usernameUploadPath`，与后端不一致时只改这一处
 
 ### `POST /userinfo/update/avatar`
 
@@ -420,30 +495,26 @@
 - **没有 README 时返回 404**（前端据此当作「正文为空」，README 标题标注「空」）
 - 返回 204 / 空响应表示**正文被清空**，同样按空处理
 
-### `GET /users/me`（⏳ 未接入）
+### `GET /users/me`（⏳ 未接入，且暂时不需要）
 
-拉取**当前登录用户**的精简资料，供顶栏用户区展示。契约保留，但当前是**本地兜底实现**。
+拉取**当前登录用户**的精简资料，供顶栏用户区展示。
+
+> ⚠️ **现在不靠它了**：顶栏的 `id` / `name` / `login` / `avatar` 全部来自
+> **身份 cookie**（`windy-identity`，见上文）+ 令牌 `sub`，`fetchCurrentUser()` 不联网。
+> 这个契约保留，将来若要做「多端同步显示名」再启用。
 
 - 鉴权：`auth: true`（必须带 `Authorization: Bearer <token>`）
-- 令牌失效时返回 **401** —— 通信层收到带鉴权的 401 会**自动清掉本地会话**，界面随之回到未登录
+- 令牌失效时返回 **401** —— 通信层收到带鉴权的 401 会**自动清掉本地会话与身份 cookie**
 
 **响应体**：`CurrentUser`
 
 | 字段       | 类型       | 说明                                    |
 | -------- | -------- | ------------------------------------- |
 | `id`     | `string` | 用户 id —— 与令牌里的 `sub` 一致，可直接用于 `userinfo/{userid}/...` |
-| `name`   | `string` | 用户名                                   |
-| `login`  | `string` | 登录名（`@handle`）                         |
+| `name`   | `string` | 用户名（`userdetails.username`）            |
+| `login`  | `string` | 登录账号（`useroauth.account`）              |
 | `avatar` | `string` | 头像地址；为空时使用内置占位头像                      |
 
-> ⚠️ 前端目前是**本地兜底实现**：不联网，从会话里造一份资料 ——
-> **`id` 解令牌的 `sub`**，`name` / `login` 取账号（邮箱只取 `@` 前部分），`avatar` 为空。
-> 于是所有已登录用户都有自己的默认主页 —— 资料字段为空、关注数为 0，
-> 没有 README.md 时界面上标注「空」。令牌不是 JWT 时 `id` 回落账号，账号也没有就回落 `me`。
-> 接口就绪后只改 `fetchCurrentUser()` 的函数体，调用方不用动。
->
-> ⚠️ 注意 `id` 的回落只用于**内部请求**，不构成 username 访问：路由侧只认 `me` / `dev` / userid，
-> `/user/<账号>` 会走「按 userid 取后端资料」并失败。
 
 ---
 

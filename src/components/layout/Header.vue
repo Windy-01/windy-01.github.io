@@ -64,12 +64,13 @@
         >
           <span class="header-user__avatar" :style="avatarStyle" aria-hidden="true">
             <img
-              v-if="currentUser?.avatar"
-              :src="currentUser.avatar"
+              v-if="hasAvatarImage"
+              :src="currentUser?.avatar"
               alt=""
               decoding="async"
+              @error="avatarBroken = true"
             >
-            <!-- 资料接口没接入时，用账号首字母 + 派生色做临时头像，不同账号一眼能分开 -->
+            <!-- 没有头像（或接口 404）时，用账号首字母 + 派生色做临时头像，不同账号一眼能分开 -->
             <span v-else-if="avatarInitial" class="header-user__initial">{{ avatarInitial }}</span>
             <svg v-else viewBox="0 0 40 40" focusable="false">
               <circle cx="20" cy="20" r="20" fill="#cbd5e1" />
@@ -88,14 +89,14 @@
             role="menu"
             aria-label="用户菜单"
           >
-            <!-- 临时账号信息：资料接口接入后换成服务端的名字 / 头像 -->
+            <!-- 账号信息：上面一行是用户名，下面一行是登录账号（不可改） -->
             <li
               v-if="loggedIn && accountLabel !== ''"
               class="header-user-menu__account"
               role="none"
             >
-              <span class="header-user-menu__account-name">{{ accountLabel }}</span>
-              <span class="header-user-menu__account-note">本地记录 · 资料接口未接入</span>
+              <span class="header-user-menu__account-name">{{ currentUser?.name || accountLabel }}</span>
+              <span class="header-user-menu__account-note">@{{ accountLabel }}</span>
             </li>
             <li v-for="item in userMenuItems" :key="item.to" role="none">
               <RouterLink
@@ -154,7 +155,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { loggedIn, session } from '../../api/session'
-import { currentUserId, fetchCurrentUser } from '../../api/users'
+import { currentAccount, identity, saveIdentity } from '../../api/identity'
+import { fetchRemoteUsername } from '../../api/userinfo'
+import { fetchCurrentUser } from '../../api/users'
 import type { CurrentUser } from '../../api/users'
 
 const headerActions = [
@@ -165,10 +168,7 @@ const headerActions = [
   { label: 'About', to: '/about' },
 ]
 
-/** 未登录时「个人主页」指向的本地占位用户（仓库里目前唯一的用户）。 */
-const fallbackUserId = 'dev'
-
-/** 当前登录用户的资料（眼下由会话里的账号派生，见 `fetchCurrentUser()`）。 */
+/** 当前登录用户的资料（来自身份 cookie，见 `api/identity.ts`；不联网）。 */
 const currentUser = ref<CurrentUser | null>(null)
 
 /** 请求序号：登录态连续变化时只认最后一次的结果。 */
@@ -185,8 +185,30 @@ async function loadCurrentUser() {
   try {
     const result = await fetchCurrentUser()
 
-    if (request === currentUserRequest) {
-      currentUser.value = result
+    if (request !== currentUserRequest) {
+      return
+    }
+
+    currentUser.value = result
+
+    // 有 userid 就再问后端一次：**右上角的名字以这次 GET 为准**，
+    // cookie 只是它的缓存 —— 别处改过名字、换了设备，刷新页面就能纠正回来。
+    if (result === null || result.id === '') {
+      return
+    }
+
+    try {
+      const username = await fetchRemoteUsername(result.id)
+
+      if (request !== currentUserRequest || username === '') {
+        return
+      }
+
+      currentUser.value = { ...result, name: username }
+      // 顺手写回缓存。值没变时 `saveIdentity` 是空操作，不会触发 `watch(identity)` 循环。
+      saveIdentity({ username })
+    } catch {
+      // 取不到就用 cookie 里的旧值，顶栏照常可用。
     }
   } catch {
     // 资料接口失败不该让顶栏不可用，退化成占位文案即可。
@@ -197,12 +219,12 @@ async function loadCurrentUser() {
 }
 
 /**
- * 当前账号的完整值（登录时填的用户名或邮箱）。
+ * 当前账号（登录账号 `account`，不可改）。
  *
- * 资料接口 `GET /users/me` 还没接入，所以这就是眼下唯一能区分「登录的是谁」的信息。
- * 老会话（`windy-session` 里没有 `account`）读回空串，界面退回「已登录」占位。
+ * 来源：身份 cookie 里缓存的 `account` → 登录时填的值（`session.account`）。
+ * 后端没有「按 userid 查 account」的接口，所以只有这两个来源。
  */
-const accountLabel = computed(() => session.value?.account ?? '')
+const accountLabel = computed(() => currentAccount())
 
 /** 顶栏空间有限：超过 14 字符截断，完整值见菜单与 `title`。 */
 function truncate(text: string): string {
@@ -220,8 +242,8 @@ function shortenAccount(account: string): string {
 /**
  * 头像旁的文字。
  *
- * 优先级：资料里的显示名 → 登录时填的账号 → 「已登录 / 未登录」占位。
- * 前两级都有区分度，最后一级只会在老会话或资料缺失时出现。
+ * 优先级：用户名（`userdetails.username`）→ 登录账号（邮箱只留 `@` 前）→「已登录 / 未登录」。
+ * 前两级都有区分度，最后一级只会在老会话（cookie 没写上）时出现。
  */
 const userDisplayName = computed(() => {
   const name = currentUser.value?.name.trim() ?? ''
@@ -237,15 +259,21 @@ const userDisplayName = computed(() => {
   return loggedIn.value ? '已登录' : '未登录'
 })
 
-/** 悬停提示：把「这是临时展示」明确说出来，免得被当成真实资料。 */
+/** 悬停提示：显示名与登录账号是两回事，完整值放在这里。 */
 const userTitle = computed(() => {
   if (!loggedIn.value) {
     return '未登录'
   }
 
+  const name = currentUser.value?.name.trim() ?? ''
+
+  if (name === '' && accountLabel.value === '') {
+    return '已登录'
+  }
+
   return accountLabel.value !== ''
-    ? `当前账号：${accountLabel.value}（临时显示，资料接口未接入）`
-    : '已登录（资料接口未接入）'
+    ? `${name !== '' ? `${name} · ` : ''}@${accountLabel.value}`
+    : name
 })
 
 /**
@@ -263,10 +291,22 @@ function hueOf(text: string): number {
   return hash
 }
 
+/**
+ * 头像图片是否可用。
+ *
+ * ⚠️ 后端没有头像时 `GET userinfo/{userid}/avatar` 会 404，`<img>` 就成破图 ——
+ * 加载失败后置 `avatarBroken`，回落到「首字母 + 派生色」的临时头像。
+ */
+const avatarBroken = ref(false)
+
+const hasAvatarImage = computed(
+  () => (currentUser.value?.avatar ?? '') !== '' && !avatarBroken.value,
+)
+
 /** 临时头像上的首字母：邮箱取 `@` 前第一个字符，用户名直接取首个字符。 */
 const avatarInitial = computed(() => {
-  // 有真实头像时不用字母。
-  if ((currentUser.value?.avatar ?? '') !== '') {
+  // 有可用的真实头像时不用字母。
+  if (hasAvatarImage.value) {
     return ''
   }
 
@@ -284,7 +324,7 @@ const avatarInitial = computed(() => {
 
 /** 临时头像的底色；有真实头像或拿不到账号时交给原有样式。 */
 const avatarStyle = computed(() => {
-  if ((currentUser.value?.avatar ?? '') !== '' || avatarInitial.value === '') {
+  if (hasAvatarImage.value || avatarInitial.value === '') {
     return undefined
   }
 
@@ -297,14 +337,21 @@ const avatarStyle = computed(() => {
 /**
  * 「个人主页」的目标 —— **随登录态变化**。
  *
- * - 已登录：`/user/me`（保留 id，由页面自己解析成当前用户；解析不到时
- *   那个路由渲染「还没有设置个人主页」状态）。
- * - 未登录：`/user/dev`（仓库里的本地占位用户，登录前也保留这个入口）。
+ * - 已登录：`/user/{account}`（账号不可改，链接稳定）。
+ * - 未登录：`/user`（作者展示页，本地静态资料，不联网）。
  *
- * 这里不直接拼 `currentUser.id` 是刻意的：资料是异步拉的，拼 id 会让链接
- * 从 `/user/me` 抖成 `/user/xxx`；用保留 id 链接才是稳定的。
+ * ⚠️ 拿不到 account（老会话、cookie 没写上）时回落到 `/user`，
+ * 别拼出一个 `/user/` 结尾的坏地址。
  */
-const profilePath = computed(() => `/user/${loggedIn.value ? currentUserId : fallbackUserId}`)
+const profilePath = computed(() => {
+  if (!loggedIn.value) {
+    return '/user'
+  }
+
+  const account = accountLabel.value
+
+  return account !== '' ? `/user/${account}` : '/user'
+})
 
 /**
  * 用户菜单项 —— 完全由登录状态派生。
@@ -355,6 +402,15 @@ watch(() => session.value, () => {
   closeUserMenu()
   void loadCurrentUser()
 }, { immediate: true })
+
+/**
+ * 身份 cookie 一变就重新读：登录成功写入 username / account / userid、
+ * 改完用户名后刷新缓存，都会走到这里，顶栏不用等刷新页面。
+ */
+watch(identity, () => {
+  avatarBroken.value = false
+  void loadCurrentUser()
+})
 
 function toggleUserMenu() {
   isUserMenuOpen.value = !isUserMenuOpen.value
