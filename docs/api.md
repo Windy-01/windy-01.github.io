@@ -123,18 +123,20 @@
 
 **响应体**：`ChatConversation[]`
 
-| 字段            | 类型                             | 说明                            |
-| ------------- | ------------------------------ | ----------------------------- |
-| `id`          | `string`                       | 会话 id，也是消息里的 `conversationId` |
-| `name`        | `string`                       | 会话名称：单聊是对方名字，群聊是群名            |
-| `avatar`      | `string`                       | 头像地址；为空时界面用名称首字生成占位头像         |
-| `kind`        | `'direct' \| 'group' \| 'bot'` | 单聊 / 群聊 / 系统通知                |
-| `memberCount` | `number`                       | 群聊成员数；非群聊为 0                  |
-| `lastMessage` | `string`                       | 最后一条消息的摘要，列表里单行截断展示           |
-| `updatedAt`   | `string`                       | 最后一条消息的时间，**ISO 字符串**         |
-| `unread`      | `number`                       | 未读数；0 表示没有未读                  |
+| 字段            | 类型                                          | 说明                            |
+| ------------- | ------------------------------------------- | ----------------------------- |
+| `id`          | `string`                                    | 会话 id，也是消息里的 `conversationId` |
+| `name`        | `string`                                    | 会话名称：单聊是对方名字，群聊是群名            |
+| `avatar`      | `string`                                    | 头像地址；为空时界面用名称首字生成占位头像         |
+| `kind`        | `'direct' \| 'group' \| 'bot'`              | 单聊 / 群聊 / 系统通知                |
+| `memberCount` | `number`                                    | 群聊成员数；非群聊为 0                  |
+| `lastMessage` | `string`                                    | 最后一条消息的摘要，列表里单行截断展示           |
+| `updatedAt`   | `string`                                    | 最后一条消息的时间，**ISO 字符串**         |
+| `unread`      | `number`                                    | 未读数；0 表示没有未读                  |
 
 > ⚠️ 列表顺序由前端**按 `updatedAt` 倒序派生**，不依赖后端返回顺序。
+>
+> ⚠️ 「与 Agent 对话」**不属于这里**：它是独立的数据与布局，见下方「与 Agent 对话」一节。
 
 ### `GET /chat/conversations/:id/messages`
 
@@ -170,6 +172,39 @@
 | `content`        | `string` | 消息正文    |
 
 **响应**：无响应体（前端按 `void` 处理）。
+
+---
+
+## 与 Agent 对话
+
+`src/api/agent.ts` — ⏳ **只预留契约，一个请求都不发**。
+
+**和上面的「聊天」是两套东西**：`chat.ts` 面向人与人 / 群聊（会话列表、未读、群成员），
+这里面向「与助手一问一答」（会话历史、消息流、流式回复）。两者的类型与状态互不复用，
+只有消息体借用了 `ChatMessage`。
+
+界面在 `ChatAgent.vue`：第一栏的「与 Agent 对话」标签切过去后，第二三栏整体替换为
+**历史侧栏 + 居中对话流 + 悬浮输入框**，不再走会话列表那套三栏。
+
+| 方法     | 路径                               | 说明                                             |
+| ------ | -------------------------------- | ------------------------------------------------ |
+| `GET`  | `/agent/sessions`                | 历史会话列表（按 `updatedAt` 倒序）                          |
+| `POST` | `/agent/sessions`                | 新建会话，返回会话对象                                     |
+| `GET`  | `/agent/sessions/:id/messages`   | 某个会话的消息记录                                       |
+| `POST` | `/agent/messages`                | 发送消息，body `{ sessionId, content }`；响应形式（一次性 / SSE）待定 |
+
+`AgentSession` 结构：
+
+| 字段          | 类型              | 说明                          |
+| ----------- | --------------- | --------------------------- |
+| `id`        | `string`        | 会话 id，也是消息里的 `conversationId` |
+| `title`     | `string`        | 取首条用户消息截断；空串表示「新对话」         |
+| `updatedAt` | `string`        | 最后一条消息的时间，**ISO 字符串**       |
+| `messages`  | `ChatMessage[]` | 消息记录；新建的会话是空数组              |
+
+> ⚠️ 现在会话与消息**只存在内存**（`agentSessions` 在模块作用域，切标签不丢、刷新即清空）。
+> `requestAgentReply()` 是本地造的演示回复，接入后换成真实调用；若是流式，改成 SSE 或
+> `fetch` + `ReadableStream`，视图层只多一个「逐段追加」的分支。
 
 ---
 

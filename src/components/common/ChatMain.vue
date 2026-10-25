@@ -1,8 +1,9 @@
 <template>
   <div class="chat-main">
     <DocumentMain>
-      <div ref="workspaceRef" class="chat-workspace">
-        <!-- 第一栏：图标导航（5%）。聊天 / 群聊 是列表的两个标签，设置只做占位。 -->
+      <div ref="workspaceRef" class="chat-workspace" :class="{ 'is-agent': isAgentTab }">
+        <!-- 第一栏：图标导航（5%）。聊天 / 群聊 / Agent 是列表的三个标签，
+             Agent 标签本身就是「与 Agent 对话」的入口，设置只做占位。 -->
         <aside class="chat-col chat-col--rail" :style="{ width: `${railWidth}%` }">
           <button
             v-for="tab in railTabs"
@@ -28,94 +29,100 @@
           </button>
         </aside>
 
-        <!-- 第一栏与第二栏之间不提供拖拽，宽度固定为 5% / 25%。 -->
+        <!-- Agent 标签：整块换成独立的对话布局（历史侧栏 + 居中对话流 + 悬浮输入框），
+             不再复用下面「会话列表 + 消息区」那套三栏。 -->
+        <ChatAgent v-if="isAgentTab" />
 
-        <!-- 第二栏：搜索栏 + 会话列表（25%）；设置标签只渲染占位块。 -->
-        <section class="chat-col chat-col--side" :style="{ width: `${sideWidth}%` }">
-          <div v-if="activeTab !== 'settings'" class="chat-side__search">
-            <div ref="searchAreaRef" class="chat-side__search-area">
-              <input
-                v-model="keyword"
-                class="chat-side__search-input"
-                type="text"
-                placeholder="搜索"
-                aria-label="搜索会话"
-                @focus="openSearchPanel"
-                @click="openSearchPanel"
-                @keydown.esc="closeSearchPanel"
-                @keydown.enter="handleSearchEnter"
-              >
+        <template v-else>
+          <!-- 第一栏与第二栏之间不提供拖拽，宽度固定为 5% / 25%。 -->
 
-              <!-- 点击搜索栏弹出的二级窗口：添加好友 / 群聊 + 搜索记录。 -->
-              <ChatSearchPanel
-                v-if="searchPanelOpen"
-                :history="config.searchHistory"
-                :note="searchNote"
-                @select="handleHistorySelect"
-                @clear="handleHistoryClear"
-                @add-contact="handleAddContact"
+          <!-- 第二栏：搜索栏 + 会话列表（25%）；设置标签只渲染占位块。 -->
+          <section class="chat-col chat-col--side" :style="{ width: `${sideWidth}%` }">
+            <div v-if="activeTab !== 'settings'" class="chat-side__search">
+              <div ref="searchAreaRef" class="chat-side__search-area">
+                <input
+                  v-model="keyword"
+                  class="chat-side__search-input"
+                  type="text"
+                  placeholder="搜索"
+                  aria-label="搜索会话"
+                  @focus="openSearchPanel"
+                  @click="openSearchPanel"
+                  @keydown.esc="closeSearchPanel"
+                  @keydown.enter="handleSearchEnter"
+                >
+
+                <!-- 点击搜索栏弹出的二级窗口：添加好友 / 群聊 + 搜索记录。 -->
+                <ChatSearchPanel
+                  v-if="searchPanelOpen"
+                  :history="config.searchHistory"
+                  :note="searchNote"
+                  @select="handleHistorySelect"
+                  @clear="handleHistoryClear"
+                  @add-contact="handleAddContact"
+                />
+              </div>
+            </div>
+            <div class="chat-side__body">
+              <ChatConversationList
+                v-if="activeTab !== 'settings'"
+                :conversations="visibleConversations"
+                :active-id="activeConversationId"
+                :empty-text="listEmptyText"
+                @select="handleSelect"
+              />
+
+              <!-- 设置标签：只做占位，不提供任何配置项。 -->
+              <div v-else class="chat-side__placeholder">
+                <p class="chat-side__placeholder-title">设置</p>
+                <p class="chat-side__placeholder-text">栏目已预留，配置项待补充。</p>
+              </div>
+            </div>
+          </section>
+
+          <div
+            class="chat-splitter chat-splitter--column"
+            :style="{ left: `calc(${railWidth + sideWidth}% - 4px)` }"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整第二栏宽度"
+            @pointerdown.prevent="startColumnDrag(1, $event)"
+          />
+
+          <!-- 第三栏：展示区 + 合并区（功能列表 + 输入，70%）。
+               没有选中会话时不显示下方合并区，展示区铺满整栏。 -->
+          <section ref="mainColRef" class="chat-col chat-col--main" :style="{ width: `${mainWidth}%` }">
+            <div class="chat-pane chat-pane--display" :style="displayPaneStyle">
+              <ChatMessageList
+                :conversation="activeConversation"
+                :messages="messages"
+                :loading="loading"
+                :error="error"
+                :empty-text="messageEmptyText"
               />
             </div>
-          </div>
-          <div class="chat-side__body">
-            <ChatConversationList
-              v-if="activeTab !== 'settings'"
-              :conversations="visibleConversations"
-              :active-id="activeConversationId"
-              :empty-text="listEmptyText"
-              @select="handleSelect"
-            />
 
-            <!-- 设置标签：只做占位，不提供任何配置项。 -->
-            <div v-else class="chat-side__placeholder">
-              <p class="chat-side__placeholder-title">设置</p>
-              <p class="chat-side__placeholder-text">栏目已预留，配置项待补充。</p>
-            </div>
-          </div>
-        </section>
+            <template v-if="activeConversationId !== ''">
+              <div
+                class="chat-splitter chat-splitter--row"
+                :style="{ top: `calc(${displayHeight}% - 4px)` }"
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="调整展示窗口高度"
+                @pointerdown.prevent="startRowDrag(0, $event)"
+              />
 
-        <div
-          class="chat-splitter chat-splitter--column"
-          :style="{ left: `calc(${railWidth + sideWidth}% - 4px)` }"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="调整第二栏宽度"
-          @pointerdown.prevent="startColumnDrag(1, $event)"
-        />
+              <!-- 合并区：功能列表在上（固定 5% 高），输入窗口在下；两者之间不提供拖拽手柄。 -->
+              <div class="chat-compose__tools" :style="{ height: `${toolsHeight}%` }">
+                <ChatToolbar :note="toolNote" @action="handleToolAction" />
+              </div>
 
-        <!-- 第三栏：展示区 + 合并区（功能列表 + 输入，70%）。
-             没有选中会话时不显示下方合并区，展示区铺满整栏。 -->
-        <section ref="mainColRef" class="chat-col chat-col--main" :style="{ width: `${mainWidth}%` }">
-          <div class="chat-pane chat-pane--display" :style="displayPaneStyle">
-            <ChatMessageList
-              :conversation="activeConversation"
-              :messages="messages"
-              :loading="loading"
-              :error="error"
-              :empty-text="messageEmptyText"
-            />
-          </div>
-
-          <template v-if="activeConversationId !== ''">
-            <div
-              class="chat-splitter chat-splitter--row"
-              :style="{ top: `calc(${displayHeight}% - 4px)` }"
-              role="separator"
-              aria-orientation="horizontal"
-              aria-label="调整展示窗口高度"
-              @pointerdown.prevent="startRowDrag(0, $event)"
-            />
-
-            <!-- 合并区：功能列表在上（固定 5% 高），输入窗口在下；两者之间不提供拖拽手柄。 -->
-            <div class="chat-compose__tools" :style="{ height: `${toolsHeight}%` }">
-              <ChatToolbar :note="toolNote" @action="handleToolAction" />
-            </div>
-
-            <div class="chat-compose__input">
-              <ChatComposer :hint="composerHint" @send="handleSend" />
-            </div>
-          </template>
-        </section>
+              <div class="chat-compose__input">
+                <ChatComposer :hint="composerHint" @send="handleSend" />
+              </div>
+            </template>
+          </section>
+        </template>
       </div>
     </DocumentMain>
   </div>
@@ -133,6 +140,7 @@ import {
   pushSearchHistory,
   useConfig,
 } from '../../config'
+import ChatAgent from './ChatAgent.vue'
 import ChatComposer from './ChatComposer.vue'
 import ChatConversationList from './ChatConversationList.vue'
 import ChatMessageList from './ChatMessageList.vue'
@@ -150,8 +158,14 @@ interface DragState {
   containerSize: number
 }
 
-/** 第一栏的三个标签。设置只做占位，不提供任何配置项。 */
-type ChatRailTabId = 'chat' | 'group' | 'settings'
+/**
+ * 第一栏的四个标签。
+ *
+ * `agent` 是「与 Agent 对话」的入口：切过去后**整块换成 `ChatAgent.vue` 的对话布局**
+ * （历史侧栏 + 居中对话流 + 悬浮输入框），不再走这里的会话列表 / 消息区；
+ * `settings` 只做占位，不提供任何配置项。
+ */
+type ChatRailTabId = 'chat' | 'group' | 'agent' | 'settings'
 
 interface RailTab {
   id: ChatRailTabId
@@ -182,6 +196,19 @@ const railTabs: RailTab[] = [
       'M16 3.13a4 4 0 0 1 0 7.75',
     ],
     circles: [[9, 7, 4]],
+  },
+  {
+    // 四角星：与 Agent 对话（AI 的通用语义）。
+    id: 'agent',
+    label: '与 Agent 对话',
+    paths: [
+      'M9.94 15.5A2 2 0 0 0 8.5 14.06L2.37 12.48a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z',
+      'M20 2v4',
+      'M22 4h-4',
+      'M4 17v2',
+      'M5 18H3',
+    ],
+    circles: [],
   },
   {
     // 齿轮：设置（占位）。
@@ -244,6 +271,12 @@ let searchNoteTimer: number | undefined
 const railWidth = computed(() => columnWidths.value[0] ?? chatRailWidth)
 const sideWidth = computed(() => columnWidths.value[1] ?? 0)
 const mainWidth = computed(() => columnWidths.value[2] ?? 0)
+
+/**
+ * Agent 标签用的是**另一套布局**（`ChatAgent.vue`）：第二、三栏整个不渲染，
+ * 分栏比例、会话列表、功能条、拖拽手柄都与它无关。
+ */
+const isAgentTab = computed(() => activeTab.value === 'agent')
 
 const composeHeight = computed(() => 100 - displayHeight.value)
 
@@ -327,7 +360,8 @@ function handleRailSelect(id: ChatRailTabId) {
   activeTab.value = id
 
   // 设置标签下搜索栏整个不渲染，弹层必须一起收掉，否则会「悬空」留在内存里。
-  if (id === 'settings') {
+  // Agent 标签同理：那一整块（含搜索栏）都不渲染，不收起的话切回来弹层会自己冒出来。
+  if (id === 'settings' || id === 'agent') {
     closeSearchPanel()
   }
 }
@@ -867,9 +901,19 @@ onUnmounted(() => {
   opacity: 1;
 }
 
+/* Agent 模式下把第一栏压到与历史侧栏同一档：两者合成一条导航列，
+   右侧对话区（34% 白）才立得起来。其他标签仍是 20%，不受影响。 */
+.chat-workspace.is-agent {
+  --chat-rail-bg: rgb(255 255 255 / 14%);
+}
+
 :global(.dark-mode .chat-workspace) {
   --chat-rail-bg: rgb(15 23 42 / 16%);
   --chat-side-bg: rgb(15 23 42 / 22%);
+}
+
+:global(.dark-mode .chat-workspace.is-agent) {
+  --chat-rail-bg: rgb(15 23 42 / 18%);
 }
 
 :global(.dark-mode .chat-col--rail),
