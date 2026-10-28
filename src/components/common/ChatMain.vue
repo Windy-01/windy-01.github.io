@@ -99,6 +99,7 @@
                 :loading="loading"
                 :error="error"
                 :empty-text="messageEmptyText"
+                :show-demo-tag="false"
               />
             </div>
 
