@@ -64,13 +64,22 @@ export interface RequestOptions {
    * 公开接口（登录 / 注册等）显式传 `false`，避免带上过期的旧令牌。
    */
   auth?: boolean
+  /**
+   * 覆盖本次请求的前缀地址（**已经是规范化后的值**，不含末尾斜杠）。
+   *
+   * 只给「后端地址与站内后端不同」的场景用 —— 目前只有 Agent 界面
+   * （`config.agentApiBaseUrl`，见 `./agent.ts` 的 `agentBackend()`）。
+   * 不传时仍走 `config.apiBaseUrl`；**业务路径照旧不带 `/api`**。
+   */
+  baseUrl?: string
 }
 
 /** 拼出最终请求地址：base url 无指定或格式错误时，回落到同源相对路径。 */
-function resolveUrl(path: string, query?: QueryParams): string {
+function resolveUrl(path: string, query?: QueryParams, baseUrl?: string): string {
   const { config } = useConfig()
-  // `normalizeApiBaseUrl()` 对「留空 / 格式错误」统一返回空串，即与站点同源。
-  const base = normalizeApiBaseUrl(config.apiBaseUrl)
+  // 调用方传了覆盖地址就用它（已规整）；否则 `normalizeApiBaseUrl()` 对
+  // 「留空 / 格式错误」统一返回空串，即与站点同源。
+  const base = baseUrl ?? normalizeApiBaseUrl(config.apiBaseUrl)
   const suffix = path.startsWith('/') ? path : `/${path}`
 
   let url = `${base}${suffix}`
@@ -158,7 +167,7 @@ async function readBody(response: Response): Promise<unknown> {
  * - 请求没能发出（断网 / 服务未启动）：抛 `ApiError`，`status` 为 `0`。
  */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, textBody, query, signal, auth = true } = options
+  const { method = 'GET', body, textBody, query, signal, auth = true, baseUrl } = options
   const headers: Record<string, string> = { Accept: 'application/json' }
   let payload: BodyInit | undefined
 
@@ -185,7 +194,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   let response: Response
 
   try {
-    response = await fetch(resolveUrl(path, query), { method, headers, body: payload, signal })
+    response = await fetch(resolveUrl(path, query, baseUrl), { method, headers, body: payload, signal })
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') {
       throw cause

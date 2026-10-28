@@ -29,6 +29,8 @@
 - ⚠️ **下文所有路径都从资源段开始写，不带 `/api`**：`apiBaseUrl` 通常已经填成 `https://example.com/api`，
   代码里再写一遍就成了 `/api/api/userinfo/...`。要改前缀只改配置，不动代码。
 - **留空或格式错误都回落到「与站点同源」的相对路径**。合法值必须是 `http:` / `https:` 绝对地址。
+- **例外只有一处**：Agent 界面可以用 `baseUrl` 选项覆盖本次请求的前缀（`config.agentApiBaseUrl`，
+  见「与 Agent 对话」）。覆盖值必须**已经是规范化后的地址**，业务路径照旧不带 `/api`。
 - 查询参数用 `query` 选项传，值为 `undefined` / `null` 的键会被跳过。
 
 **鉴权**
@@ -177,7 +179,7 @@
 
 ## 与 Agent 对话
 
-`src/api/agent.ts` — ⏳ **只预留契约，一个请求都不发**。
+`src/api/agent.ts` — **发消息是真的打后端**（`POST /agent/chat`），会话历史仍是内存。
 
 **和上面的「聊天」是两套东西**：`chat.ts` 面向人与人 / 群聊（会话列表、未读、群成员），
 这里面向「与助手一问一答」（会话历史、消息流、流式回复）。两者的类型与状态互不复用，
@@ -186,25 +188,58 @@
 界面在 `ChatAgent.vue`：第一栏的「与 Agent 对话」标签切过去后，第二三栏整体替换为
 **历史侧栏 + 居中对话流 + 悬浮输入框**，不再走会话列表那套三栏。
 
-| 方法     | 路径                               | 说明                                             |
-| ------ | -------------------------------- | ------------------------------------------------ |
-| `GET`  | `/agent/sessions`                | 历史会话列表（按 `updatedAt` 倒序）                          |
-| `POST` | `/agent/sessions`                | 新建会话，返回会话对象                                     |
-| `GET`  | `/agent/sessions/:id/messages`   | 某个会话的消息记录                                       |
-| `POST` | `/agent/messages`                | 发送消息，body `{ sessionId, content }`；响应形式（一次性 / SSE）待定 |
+### 地址从哪来
+
+Agent 后端可以**独立于站内后端**，在 Agent 界面右上角的齿轮里填 `ip:port`：
+
+| 优先级 | 来源 | 说明 |
+| --- | --- | --- |
+| 1 | `config.agentApiBaseUrl` | 齿轮里填的值（cookie `windy-settings`）。**允许不写协议**，`127.0.0.1:8000` 自动补 `http://`；可带路径前缀（`127.0.0.1:8000/api`） |
+| 2 | `config.apiBaseUrl` | 没填专用地址时回落（设置 → 网络里的 API Base URL） |
+| 3 | 都没有 | 不发请求，回一条明确标注的本地演示文案 |
+
+> ⚠️ 路径常量 `agentChatPath = '/agent/chat'` **不写 `/api`**，前缀由上面两处提供。
+> ⚠️ 走专用地址时**不带** `Authorization`（那是用户自己的服务，不该收到站内令牌）；
+> 回落到全局地址时照常带。
+> ⚠️ 专用地址要求对方允许跨域（`Access-Control-Allow-Origin`），否则会以
+> `ApiError.status === 0` 的形式失败，界面提示「无法连接到 Agent 后端」。
+
+### 已实现
+
+| 方法   | 路径           | 说明 |
+| ---- | ------------ | ---- |
+| `POST` | `/agent/chat` | 发送一条消息，body `{ sessionId, message }` |
+
+**响应是宽容解析的**，后端用哪个键都能接上（`extractReply()`）：
+
+- `{ reply }` / `{ content }` / `{ message }` / `{ answer }` / `{ text }` / `{ response }` / `{ output }` / `{ result }`
+- `{ data: { … } }` 包一层
+- OpenAI 风格 `{ choices: [{ message: { content } }] }` 或 `{ choices: [{ text }] }`
+- **纯文本**（`Content-Type: text/plain`）也认
+
+抽不到内容时抛错「后端响应里没有可识别的回复内容」。非 2xx 与「请求没发出去」都会被翻成
+一句可直接展示的文案（带状态码 / 地址），显示在对话流末尾的红条里 —— **不写进消息历史**。
+
+### 未实现（等后端定了再补）
+
+| 方法       | 路径                             | 说明 |
+| -------- | ------------------------------ | ---- |
+| `GET`    | `/agent/sessions`              | 历史会话列表（按 `updatedAt` 倒序） |
+| `GET`    | `/agent/sessions/:id/messages` | 某个会话的消息记录 |
+| `DELETE` | `/agent/sessions/:id`          | 删除会话 |
 
 `AgentSession` 结构：
 
 | 字段          | 类型              | 说明                          |
 | ----------- | --------------- | --------------------------- |
-| `id`        | `string`        | 会话 id，也是消息里的 `conversationId` |
+| `id`        | `string`        | 会话 id，也是消息里的 `conversationId`；随每条消息发给后端做上下文串联 |
 | `title`     | `string`        | 取首条用户消息截断；空串表示「新对话」         |
 | `updatedAt` | `string`        | 最后一条消息的时间，**ISO 字符串**       |
 | `messages`  | `ChatMessage[]` | 消息记录；新建的会话是空数组              |
 
 > ⚠️ 现在会话与消息**只存在内存**（`agentSessions` 在模块作用域，切标签不丢、刷新即清空）。
-> `requestAgentReply()` 是本地造的演示回复，接入后换成真实调用；若是流式，改成 SSE 或
-> `fetch` + `ReadableStream`，视图层只多一个「逐段追加」的分支。
+> 要接多轮上下文，后端按 `sessionId` 自己维护即可；前端不做历史回放。
+> 若是流式回复，改成 SSE 或 `fetch` + `ReadableStream`，视图层只多一个「逐段追加」的分支。
 
 ---
 

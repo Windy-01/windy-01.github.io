@@ -78,6 +78,14 @@ export interface SiteConfig {
    * **留空或格式错误都表示「无有效指定」**，此时回落到与站点同源的相对路径。
    */
   apiBaseUrl: string
+  /**
+   * Agent 后端的独立地址（用户手填的 `ip:port`，例如 `127.0.0.1:8000`）。
+   *
+   * 与 `apiBaseUrl` 的关系是**覆盖**而不是叠加：填了就只用它打 Agent 的接口，
+   * 留空则回落到 `apiBaseUrl`；两者都空时 Agent 界面走本地演示回复。
+   * 由 `./agentEndpoint.ts` 的 `normalizeAgentBaseUrl()` 规整（允许不带协议）。
+   */
+  agentApiBaseUrl: string
   stickyNote: StickyNoteConfig
   chatLayout: ChatLayoutConfig
   /**
@@ -104,6 +112,7 @@ export type PersistedConfig = Pick<
   | 'defaultSearchEngineId'
   | 'searchEngines'
   | 'apiBaseUrl'
+  | 'agentApiBaseUrl'
   | 'chatLayout'
   | 'searchHistory'
   | 'chatStorage'

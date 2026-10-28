@@ -51,6 +51,14 @@ export const defaultSearchEngineId = defaultSearchEngine.id
  */
 export const defaultApiBaseUrl = ''
 
+/**
+ * Agent 后端的默认地址：**空串**，表示「没有单独配置」。
+ *
+ * 此时 Agent 界面回落到上面的 `apiBaseUrl`；那边也为空时走本地演示回复。
+ * 用户可在 Agent 界面右上角的设置里填 `ip:port`（允许不写协议，自动补 `http://`）。
+ */
+export const defaultAgentApiBaseUrl = ''
+
 /** 便签小窗默认配置。 */
 export const defaultStickyNote: StickyNoteConfig = {
   title: '便签',
@@ -106,6 +114,7 @@ export function createDefaultConfig(): SiteConfig {
     defaultSearchEngineId,
     searchEngines: defaultSearchEngines.map((engine) => ({ ...engine })),
     apiBaseUrl: defaultApiBaseUrl,
+    agentApiBaseUrl: defaultAgentApiBaseUrl,
     stickyNote: {
       ...defaultStickyNote,
       offset: { ...defaultStickyNote.offset },

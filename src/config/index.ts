@@ -37,6 +37,7 @@ interface StoredConfig {
   defaultSearchEngineId?: unknown
   searchEngines?: Record<string, { name?: unknown, url?: unknown }>
   apiBaseUrl?: unknown
+  agentApiBaseUrl?: unknown
   stickyNoteContent?: unknown
   chatLayout?: unknown
   searchHistory?: unknown
@@ -81,6 +82,7 @@ function pickPersisted(source: SiteConfig): PersistedConfig {
     defaultSearchEngineId: source.defaultSearchEngineId,
     searchEngines: source.searchEngines,
     apiBaseUrl: source.apiBaseUrl,
+    agentApiBaseUrl: source.agentApiBaseUrl,
     stickyNoteContent: source.stickyNote.content,
     chatLayout: {
       columnWidths: [...source.chatLayout.columnWidths],
@@ -107,6 +109,7 @@ function serializeConfig(source: PersistedConfig): string {
     defaultSearchEngineId: source.defaultSearchEngineId,
     searchEngines,
     apiBaseUrl: source.apiBaseUrl,
+    agentApiBaseUrl: source.agentApiBaseUrl,
     stickyNoteContent: source.stickyNoteContent,
     chatLayout: {
       columnWidths: source.chatLayout.columnWidths,
@@ -152,6 +155,7 @@ function loadConfig(): SiteConfig {
     defaultSearchEngineId,
     searchEngines,
     apiBaseUrl: readString(stored.apiBaseUrl, defaults.apiBaseUrl),
+    agentApiBaseUrl: readString(stored.agentApiBaseUrl, defaults.agentApiBaseUrl),
     stickyNote: {
       ...defaults.stickyNote,
       content: readNoteContent(stored.stickyNoteContent, defaults.stickyNote.content),
@@ -208,6 +212,7 @@ export function saveConfig(next: Partial<PersistedConfig>): boolean {
   config.defaultSearchEngineId = merged.defaultSearchEngineId
   config.searchEngines = merged.searchEngines.map((engine) => ({ ...engine }))
   config.apiBaseUrl = merged.apiBaseUrl
+  config.agentApiBaseUrl = merged.agentApiBaseUrl
   config.stickyNote.content = merged.stickyNoteContent
   // 整体替换成一个新对象，方便组件用 `watch(() => config.chatLayout)` 感知变化。
   config.chatLayout = {
@@ -232,6 +237,7 @@ export function resetConfig(): void {
   config.defaultSearchEngineId = defaults.defaultSearchEngineId
   config.searchEngines = defaults.searchEngines
   config.apiBaseUrl = defaults.apiBaseUrl
+  config.agentApiBaseUrl = defaults.agentApiBaseUrl
   // 便签正文、聊天分栏比例、搜索记录与存储配置也在 cookie 里，恢复默认时一并重置。
   config.stickyNote = defaults.stickyNote
   config.chatLayout = defaults.chatLayout
@@ -268,6 +274,7 @@ export type {
 export { createSearchUrl, resolveSearchEngine } from './search'
 export { defaultChatStorage } from './defaults'
 export { isApiBaseUrlInvalid, normalizeApiBaseUrl } from './endpoint'
+export { isAgentBaseUrlInvalid, normalizeAgentBaseUrl } from './agentEndpoint'
 export {
   buildColumnWidths,
   chatDisplayHeightMax,

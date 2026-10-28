@@ -51,6 +51,69 @@
 
         <span class="chat-agent__bar-title">{{ barTitle }}</span>
 
+        <!-- 后端地址设置：齿轮 + 弹层。填 ip:port 就能让 Agent 用独立于站内后端。 -->
+        <div ref="settingsRef" class="chat-agent__settings">
+          <button
+            class="chat-agent__icon"
+            :class="{ 'is-active': settingsOpen }"
+            type="button"
+            :aria-expanded="settingsOpen"
+            aria-haspopup="dialog"
+            aria-label="Agent 后端设置"
+            title="Agent 后端设置"
+            @click="toggleSettings"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+
+          <div
+            v-if="settingsOpen"
+            class="chat-agent__popover"
+            role="dialog"
+            aria-label="Agent 后端设置"
+          >
+            <p class="chat-agent__popover-title">Agent 后端</p>
+
+            <label class="chat-agent__popover-field">
+              <span class="chat-agent__popover-label">ip:port</span>
+              <input
+                v-model="formEndpoint"
+                class="chat-agent__popover-input"
+                :class="{ 'is-invalid': endpointInvalid }"
+                type="text"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="127.0.0.1:8000"
+                @keydown.enter.prevent="saveEndpoint"
+              >
+            </label>
+
+            <p class="chat-agent__popover-hint" :class="{ 'is-error': endpointInvalid }">
+              {{ endpointHint }}
+            </p>
+            <p class="chat-agent__popover-hint">{{ endpointStatus }}</p>
+            <p v-if="endpointNotice !== ''" class="chat-agent__popover-hint is-error">
+              {{ endpointNotice }}
+            </p>
+
+            <div class="chat-agent__popover-actions">
+              <button class="chat-agent__popover-button" type="button" @click="settingsOpen = false">
+                取消
+              </button>
+              <button
+                class="chat-agent__popover-button is-primary"
+                type="button"
+                @click="saveEndpoint"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+
         <button
           class="chat-agent__icon"
           type="button"
@@ -75,7 +138,7 @@
               </svg>
             </span>
             <h2 class="chat-agent__empty-title">有什么可以帮你？</h2>
-            <p class="chat-agent__empty-text">接口尚未接入，当前是本地演示。</p>
+            <p class="chat-agent__empty-text">{{ emptyText }}</p>
 
             <div class="chat-agent__suggestions">
               <button
@@ -118,6 +181,11 @@
               </span>
             </div>
           </div>
+
+          <!-- 发送失败：红条放在对话流末尾，不塞进消息历史（重开对话就没了） -->
+          <p v-if="errorText !== ''" class="chat-agent__error" role="alert">
+            {{ errorText }}
+          </p>
         </div>
       </div>
 
@@ -148,7 +216,7 @@
             </button>
           </form>
 
-          <p class="agent-composer__hint">Enter 发送，Shift + Enter 换行 · 演示：消息只存在本地</p>
+          <p class="agent-composer__hint">{{ composerHint }}</p>
         </div>
       </footer>
     </section>
@@ -156,11 +224,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import type { AgentSession } from '../../api/agent'
 import {
   activeAgentSessionId,
+  agentBackend,
+  agentChatPath,
   agentSessions,
   agentSuggestions,
   createAgentSession,
@@ -168,6 +238,7 @@ import {
   titleFromContent,
 } from '../../api/agent'
 import type { ChatMessage } from '../../api/chat'
+import { isAgentBaseUrlInvalid, normalizeAgentBaseUrl, useConfig } from '../../config'
 import { formatConversationTime } from '../../utils/chatTime'
 
 /** 四角星（AI 通用语义）。上面那条路径是主星，两条短线是右上角的小星。 */
@@ -183,6 +254,112 @@ const pending = ref(false)
 
 const scrollRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
+
+/* ── 后端设置（ip:port） ─────────────────────────────────── */
+
+const { config, saveConfig } = useConfig()
+
+/** 弹层是否打开。 */
+const settingsOpen = ref(false)
+/** 输入框里正在编辑的值；打开弹层时才从配置同步，避免边打字边被覆盖。 */
+const formEndpoint = ref('')
+/** 保存失败 / 输入不合法的提示。 */
+const endpointNotice = ref('')
+
+const settingsRef = ref<HTMLElement | null>(null)
+
+/** 当前生效的后端（读响应式配置，保存后立刻跟着变）。 */
+const backend = computed(() => agentBackend())
+
+const endpointInvalid = computed(() => isAgentBaseUrlInvalid(formEndpoint.value))
+
+/** 输入框下方的即时预览：填了什么、会被打到哪个地址。 */
+const endpointHint = computed(() => {
+  const raw = formEndpoint.value.trim()
+
+  if (endpointInvalid.value) {
+    return '格式不对：应形如 127.0.0.1:8000 或 http://127.0.0.1:8000'
+  }
+
+  if (raw === '') {
+    return '留空：回落到「设置 → 网络」里的 API Base URL'
+  }
+
+  return `将请求 ${normalizeAgentBaseUrl(raw)}${agentChatPath}`
+})
+
+/** 当前实际生效的地址来源。 */
+const endpointStatus = computed(() => {
+  if (backend.value.source === 'custom') {
+    return `当前：已连接 ${backend.value.chatUrl}`
+  }
+
+  if (backend.value.source === 'global') {
+    return `当前：沿用全局地址 ${backend.value.chatUrl}`
+  }
+
+  return '当前：未配置任何后端，发消息只会得到本地演示回复'
+})
+
+/** 空态与底部提示都跟着「有没有后端」变，别让人以为已经连上了。 */
+const emptyText = computed(() => {
+  return backend.value.source === 'none'
+    ? '还没有配置 Agent 后端。点右上角的设置填上 ip:port，就能连上你自己的服务。'
+    : '后端已就绪，说点什么吧。'
+})
+
+const composerHint = computed(() => {
+  return backend.value.source === 'none'
+    ? 'Enter 发送，Shift + Enter 换行 · 未配置后端，当前为本地演示'
+    : `Enter 发送，Shift + Enter 换行 · ${backend.value.chatUrl}`
+})
+
+/** 发送失败的文案；放在对话流末尾，不写进消息历史。 */
+const errorText = ref('')
+
+function toggleSettings() {
+  settingsOpen.value = !settingsOpen.value
+
+  if (settingsOpen.value) {
+    // 每次打开都回到「已保存的值」，取消即等于放弃这次编辑。
+    formEndpoint.value = config.agentApiBaseUrl
+    endpointNotice.value = ''
+  }
+}
+
+function saveEndpoint() {
+  if (endpointInvalid.value) {
+    endpointNotice.value = '地址格式不对，未保存。'
+    return
+  }
+
+  const value = formEndpoint.value.trim()
+
+  // `saveConfig` 先写 cookie、成功才改内存；失败时保留弹层让用户重试。
+  if (!saveConfig({ agentApiBaseUrl: value })) {
+    endpointNotice.value = '保存失败：浏览器拒绝了写入（cookie 被禁用或空间不足）。'
+    return
+  }
+
+  formEndpoint.value = value
+  endpointNotice.value = ''
+  settingsOpen.value = false
+}
+
+/** 点弹层外面收起。弹层里的点击会被 `settingsRef.contains()` 挡住。 */
+function handleDocumentClick(event: MouseEvent) {
+  if (!settingsOpen.value) {
+    return
+  }
+
+  const root = settingsRef.value
+
+  if (root !== null && event.target instanceof Node && root.contains(event.target)) {
+    return
+  }
+
+  settingsOpen.value = false
+}
 
 let messageSequence = 0
 
@@ -255,6 +432,7 @@ async function startNewSession() {
   activeAgentSessionId.value = session.id
   draft.value = ''
   pending.value = false
+  errorText.value = ''
 
   await nextTick()
   autoGrow()
@@ -269,6 +447,7 @@ function selectSession(id: string) {
   activeAgentSessionId.value = id
   draft.value = ''
   pending.value = false
+  errorText.value = ''
 
   void nextTick(() => {
     autoGrow()
@@ -319,26 +498,32 @@ async function send() {
   session.updatedAt = sentAt
   draft.value = ''
   pending.value = true
+  errorText.value = ''
 
   await nextTick()
   autoGrow()
   void scrollToBottom()
 
-  const reply = await requestAgentReply(content)
+  try {
+    const reply = await requestAgentReply({ sessionId: session.id, content })
 
-  pending.value = false
+    session.messages.push({
+      id: nextMessageId(),
+      conversationId: session.id,
+      authorName: 'Agent',
+      outgoing: false,
+      content: reply,
+      sentAt: new Date().toISOString(),
+      status: 'sent',
+    })
 
-  session.messages.push({
-    id: nextMessageId(),
-    conversationId: session.id,
-    authorName: 'Agent',
-    outgoing: false,
-    content: reply,
-    sentAt: new Date().toISOString(),
-    status: 'sent',
-  })
-
-  session.updatedAt = new Date().toISOString()
+    session.updatedAt = new Date().toISOString()
+  } catch (cause) {
+    // 用户那条消息留在历史里（他确实发了），失败原因单独显示在末尾。
+    errorText.value = cause instanceof Error ? cause.message : 'Agent 请求失败。'
+  } finally {
+    pending.value = false
+  }
 }
 
 // 新消息 / 等待回复 / 切换会话都贴底。
@@ -352,6 +537,11 @@ watch(
 onMounted(() => {
   autoGrow()
   void scrollToBottom()
+  document.addEventListener('click', handleDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleDocumentClick)
 })
 </script>
 
@@ -376,7 +566,14 @@ onMounted(() => {
   --ca-bubble-border: rgb(59 130 246 / 22%);
   --ca-accent: #2563eb;
   --ca-accent-soft: rgb(59 130 246 / 14%);
+  /* 主按钮上的文字色：浅色主题配白字，暗色主题的 accent 是浅蓝，要配深字 */
+  --ca-accent-contrast: #fff;
   --ca-shadow: 0 8px 24px rgb(15 23 42 / 10%);
+  /* 弹层要压住下面的正文，几乎做实；阴影也比卡片重一档 */
+  --ca-popover-bg: rgb(255 255 255 / 97%);
+  --ca-popover-shadow: 0 18px 48px rgb(15 23 42 / 18%);
+  --ca-danger: #b91c1c;
+  --ca-danger-soft: rgb(185 28 28 / 10%);
 
   display: flex;
   flex: 1 1 auto;
@@ -576,6 +773,132 @@ onMounted(() => {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
+}
+
+/* 设置弹层打开时按钮保持高亮，让人看得出这块是「点开的」 */
+.chat-agent__icon.is-active {
+  background-color: var(--ca-active);
+  color: var(--ca-text);
+}
+
+/* ── 后端设置弹层（ip:port） ─────────────────────────────── */
+
+.chat-agent__settings {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+}
+
+/* 绝对定位挂在齿轮下方：不需要额外遮罩，滚动区不会跟着动 */
+.chat-agent__popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 296px;
+  padding: 14px;
+  border: 1px solid var(--ca-border);
+  border-radius: 14px;
+  background-color: var(--ca-popover-bg);
+  box-shadow: var(--ca-popover-shadow);
+}
+
+.chat-agent__popover-title {
+  margin: 0 0 10px;
+  color: var(--ca-text);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.chat-agent__popover-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-agent__popover-label {
+  color: var(--ca-muted);
+  font-size: 0.72rem;
+}
+
+.chat-agent__popover-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--ca-input-border);
+  border-radius: 9px;
+  background-color: var(--ca-input-bg);
+  /* ⚠️ 别写 inherit：`.dark-mode` 不下发全局文字色，会继承到 body 的黑色 */
+  color: var(--ca-input-text);
+  font: inherit;
+  font-size: 0.82rem;
+  outline: none;
+  transition: border-color 0.18s ease;
+}
+
+.chat-agent__popover-input:focus {
+  border-color: var(--ca-accent);
+}
+
+.chat-agent__popover-input.is-invalid {
+  border-color: var(--ca-danger);
+}
+
+.chat-agent__popover-hint {
+  margin: 8px 0 0;
+  color: var(--ca-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.chat-agent__popover-hint.is-error {
+  color: var(--ca-danger);
+}
+
+.chat-agent__popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.chat-agent__popover-button {
+  padding: 6px 14px;
+  border: 1px solid var(--ca-border);
+  border-radius: 9px;
+  background-color: transparent;
+  color: var(--ca-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  transition: background-color 0.18s ease, opacity 0.18s ease;
+}
+
+.chat-agent__popover-button:hover {
+  background-color: var(--ca-hover);
+}
+
+.chat-agent__popover-button.is-primary {
+  border-color: transparent;
+  background-color: var(--ca-accent);
+  color: var(--ca-accent-contrast);
+}
+
+.chat-agent__popover-button.is-primary:hover {
+  background-color: var(--ca-accent);
+  opacity: 0.88;
+}
+
+/* 发送失败的红条：在对话流末尾，不占消息位置 */
+.chat-agent__error {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background-color: var(--ca-danger-soft);
+  color: var(--ca-danger);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  word-break: break-word;
 }
 
 .chat-agent__scroll {
@@ -874,7 +1197,12 @@ onMounted(() => {
   --ca-bubble-border: rgb(96 165 250 / 30%);
   --ca-accent: #60a5fa;
   --ca-accent-soft: rgb(96 165 250 / 18%);
+  --ca-accent-contrast: #0f172a;
   --ca-shadow: 0 8px 24px rgb(0 0 0 / 32%);
+  --ca-popover-bg: rgb(15 23 42 / 96%);
+  --ca-popover-shadow: 0 18px 48px rgb(0 0 0 / 46%);
+  --ca-danger: #fca5a5;
+  --ca-danger-soft: rgb(248 113 113 / 16%);
 }
 
 @media (max-width: 1024px) {
