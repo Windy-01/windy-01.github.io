@@ -36,6 +36,14 @@ const router = createRouter({
       path: '/community',
       component: () => import('../views/community.vue'),
     },
+    // 新建帖子：文本编辑 + 导入本地 .md。目前**只做界面**，发布不联网
+    // （见 `views/post-editor.vue` 头部说明）。路径挂在 `/community` 下，
+    // 与列表页是两条静态路径，不冲突。
+    {
+      name: 'post-new',
+      path: '/community/new',
+      component: () => import('../views/post-editor.vue'),
+    },
     // 「文档」栏目有两条入口，靠**路径段数**区分，互不影响：
     // - `/document`、`/document/:id`（零段 / 一段）→ 本地静态文档，正文是 `tmp/*.md`，不联网；
     // - `/document/:userid/:postid`（两段）→ 后端帖子，与 `GET /post/:userid/:postid` 对齐。

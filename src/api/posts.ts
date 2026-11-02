@@ -211,12 +211,40 @@ export function unfavoritePost(userId: string, postId: string): Promise<void> {
 }
 
 /**
+ * 发布成功后可用的定位信息。
+ *
+ * 后端目前只回 `{Message:"suceed"}`（没有 Data），所以通常是 `null`；
+ * 一旦它在 `Data` 里带上新帖子的 `postid` / `userid`，这里就能解析出来，
+ * 前端据此直接跳到详情页 —— 不用改调用方。
+ */
+export interface CreatedPostRef {
+  /** 作者 userid；后端没给时为空串，调用方用当前登录用户兜底。 */
+  userId: string
+  /** 新帖子的 id；空串表示后端没回。 */
+  postId: string
+}
+
+/**
  * 发布帖子。
  *
  * ⚠️ 路径不带 userid：作者由后端从令牌里取，body 里只有 `author` 显示名。
+ *
+ * @returns 后端在响应里带回了帖子 id 时返回定位信息，否则 `null`（多数情况）。
+ * @throws `ApiError`：401 表示未登录 / 令牌失效，`status === 0` 表示连不上后端。
  */
-export async function createPost(payload: PostDocumentPayload): Promise<void> {
-  await postJson<unknown>(`${postPrefix}/upload`, payload, { progress: true })
+export async function createPost(payload: PostDocumentPayload): Promise<CreatedPostRef | null> {
+  const raw = await postJson<unknown>(`${postPrefix}/upload`, payload, { progress: true })
+  const record = flatten(asRecord(unwrapEnvelope(raw)) ?? {})
+  const postId = pickString(record, ['postid', 'postId', 'post_id', 'id'])
+
+  if (postId === '') {
+    return null
+  }
+
+  return {
+    userId: pickString(record, ['userid', 'userId', 'user_id', 'uid']),
+    postId,
+  }
 }
 
 /**

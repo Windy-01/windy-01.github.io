@@ -272,6 +272,25 @@ Agent 后端可以**独立于站内后端**，在 Agent 界面右上角的齿轮
 
 界面：`/document/:userid/:postid` → `views/document.vue`，正文下方带点赞 / 收藏条与评论区。
 
+发帖入口：社区页右上角「＋ 新建帖子」→ `/community/new` → `views/post-editor.vue`。
+
+> **发布已接真实后端**（`POST /post/upload`，body 只有 `{ author, title, mainText }`，
+> 作者 userid 由后端从令牌取）：
+>
+> | 情况 | 界面行为 |
+> | --- | --- |
+> | 未登录 | 不发请求，提示「发布需要先登录」，标题区上方常驻一条登录提示 |
+> | 成功且响应里带回 `postid` | 直接 `replace` 到 `/document/{userid}/{postid}` |
+> | 成功但只回状态码（**当前后端就是这样**） | `replace` 到 `/community?published=1`，社区页显示「帖子已发布。」 |
+> | 401 / 403 | 「登录状态已失效，请重新登录后再发布。」（通信层同时清会话） |
+> | `status === 0` | 「无法连接到服务器，请检查网络或设置里的 API 地址。」 |
+> | 5xx | 「服务器出错了，稍后再试一次。」 |
+>
+> 发布中「发布」与「取消」都禁用，按钮文案变「发布中…」，防重复提交。
+>
+> 眼睛图标按钮切换 Markdown 预览（复用 `MarkdownView`，与文档页同一套样式）。
+> 因为引了 `marked` + `dompurify`，打开编辑页会连带下载 `markdown` chunk（75 kB），首屏不受影响。
+
 ### 响应信封
 
 后端统一用 Go 的 `response.Build{Message, Data}`，**结构体没写 json tag**，序列化出来是**大写**：
