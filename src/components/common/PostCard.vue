@@ -152,18 +152,16 @@ onMounted(async () => {
 
   border: 1px solid var(--post-border);
   border-radius: 16px;
+  /*
+   * ⚠️ 这里**没有** `backdrop-filter`，和 `DocumentMain.vue` 同理，别加回来。
+   *
+   * 卡片本身已经在 `.layout-document-main` 里面，背后是那块半透明白 —— 再糊一次
+   * 肉眼看不出区别，但因为它随页面滚动，浏览器每帧都得重新采样 + 模糊，白掉帧。
+   */
   background-color: var(--post-surface);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
   transition:
     border-color 0.2s ease,
     transform 0.2s ease;
-}
-
-@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
-  .post-card {
-    background-color: rgb(255 255 255 / 72%);
-  }
 }
 
 /* 同样注意 :global() 是整体替换，完整选择器必须写在括号内。 */
@@ -177,12 +175,6 @@ onMounted(async () => {
   --post-tag-text: #7dd3fc;
   --post-hover-border: rgb(125 211 252 / 45%);
   --post-cover-bg: rgb(255 255 255 / 8%);
-}
-
-@supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
-  :global(.dark-mode .post-card) {
-    background-color: rgb(15 23 42 / 88%);
-  }
 }
 
 .post-card:hover {
