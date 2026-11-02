@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import { defaultDocumentId } from '../api/documents'
 import { isLoggedIn } from '../api/session'
 import { setNavigating } from '../utils/progress'
 
@@ -37,23 +36,18 @@ const router = createRouter({
       path: '/community',
       component: () => import('../views/community.vue'),
     },
-    // 「文档」栏目有两条入口，靠**路径段数**区分，互不影响：
-    // - `/document/:id`（一段）→ 本地静态文档，正文来自 `tmp/*.md`，不联网；
-    // - `/document/:userid/:postid`（两段）→ 后端帖子，与 `GET /post/:userid/:postid` 对齐。
-    // `/document` 本身不带 id，redirect 到默认文档。
+    // 「文档」栏目：`/document` 是**说明页**（纯静态文案，不联网）；
+    // 具体一篇帖子是 `/document/:userid/:postid`，与后端 `GET /post/:userid/:postid` 的两段参数对齐。
+    // ⚠️ 本地静态文档（`/document/:id`）已经取消，栏目只展示后端帖子。
     {
       name: 'document',
-      path: '/document/:id',
-      component: () => import('../views/document.vue'),
-    },
-    {
       path: '/document',
-      redirect: { name: 'document', params: { id: defaultDocumentId } },
+      component: () => import('../views/document-intro.vue'),
     },
     {
       name: 'post',
       path: '/document/:userid/:postid',
-      component: () => import('../views/post.vue'),
+      component: () => import('../views/document.vue'),
     },
     // 关于页的内容是仓库里的 README，静态资源，不经过后端。
     {

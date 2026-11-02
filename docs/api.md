@@ -12,7 +12,7 @@
 | ------------- | --- | ------------------------ |
 | [认证](#认证)     | 3   | ✅ 已接入，真实发请求              |
 | [聊天](#聊天)     | 3   | ⏳ 只预留契约，当前返回空列表 / 未接入 |
-| [文档](#文档)     | —   | ✅ 纯静态，不请求接口（正文是 `tmp/*.md`） |
+| [文档](#文档)     | —   | ✅ 纯静态说明页，不请求接口        |
 | [帖子](#帖子)     | 8   | 🚧 已接入；后端 handler 仍是空壳，响应字段按宽容解析 |
 | [评论](#评论)     | 9   | 🚧 已接入；后端 handler 仍是空壳，响应字段按宽容解析 |
 | [用户](#用户)     | 9   | 🚧 资料 / 头像 / README / 用户名读取 / 按账号查 id 已接；`update/username` 请求体形状待对齐，`/users/me` 暂不需要 |
@@ -247,17 +247,17 @@ Agent 后端可以**独立于站内后端**，在 Agent 界面右上角的齿轮
 
 ## 文档
 
-`src/api/documents.ts` — ✅ **纯静态，不请求任何接口**（正文来自 `tmp/*.md`）。
+`src/api/documents.ts` — ✅ **纯静态，不请求任何接口**。
 
-栏目有两条入口，靠**路径段数**区分：
+栏目现在只有两个页面：
 
 | 路由 | 组件 | 内容 |
 | --- | --- | --- |
-| `/document` | —（redirect） | 跳到默认文档 `defaultDocumentId`（= `markdown-test`） |
-| `/document/:id` | `views/document.vue` | **本地静态文档**：`documents.ts` 的 `localDocuments` 注册表，正文 `tmp/markdown-test.md` |
-| `/document/:userid/:postid` | `views/post.vue` | **后端帖子**详情，见下一节「帖子」 |
+| `/document` | `views/document-intro.vue` | 说明页，文案在 `documents.ts` 的 `documentIntroSource` |
+| `/document/:userid/:postid` | `views/document.vue` | 后端帖子详情，见下一节「帖子」 |
 
-> ⚠️ 两者不要合并成一个页面：一段参数的是本地文档（不联网），两段参数的是后端帖子。
+> ⚠️ 本地静态文档（`/document/:id` + `tmp/*.md` 注册表）**已取消**：
+> `defaultDocumentId` / `fetchDocument()` / `DocumentDetail` 全部删除。
 >
 > `about` 栏目也不走这里，它直接读仓库的 `README.md`，同样是纯静态资源。
 
@@ -267,7 +267,7 @@ Agent 后端可以**独立于站内后端**，在 Agent 界面右上角的齿轮
 
 `src/api/posts.ts` — 🚧 **已接入**，真实发请求（后端 windsharebase，`/api/post`）。
 
-界面：`/document/:userid/:postid` → `views/post.vue`，正文下方带点赞 / 收藏条与评论区。
+界面：`/document/:userid/:postid` → `views/document.vue`，正文下方带点赞 / 收藏条与评论区。
 
 ### 响应信封
 
