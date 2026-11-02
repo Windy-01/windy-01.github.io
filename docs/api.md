@@ -247,17 +247,20 @@ Agent 后端可以**独立于站内后端**，在 Agent 界面右上角的齿轮
 
 ## 文档
 
-`src/api/documents.ts` — ✅ **纯静态，不请求任何接口**。
+`src/api/documents.ts` — ✅ **纯静态，不请求任何接口**（正文是 `tmp/*.md`）。
 
-栏目现在只有两个页面：
+栏目有两条完全不同的入口，靠**路径段数**区分：
 
 | 路由 | 组件 | 内容 |
 | --- | --- | --- |
-| `/document` | `views/document-intro.vue` | 说明页，文案在 `documents.ts` 的 `documentIntroSource` |
+| `/document`、`/document/:id` | `views/document-reader.vue` | 本地静态文档，注册表在 `documents.ts`（`documentSources`），默认 id = `markdown-test` |
 | `/document/:userid/:postid` | `views/document.vue` | 后端帖子详情，见下一节「帖子」 |
 
-> ⚠️ 本地静态文档（`/document/:id` + `tmp/*.md` 注册表）**已取消**：
-> `defaultDocumentId` / `fetchDocument()` / `DocumentDetail` 全部删除。
+> ⚠️ `/document` **不做 redirect**：默认 id 由页面自己兜底（`defaultDocumentId`），
+> 这样路由表不必 import 文档注册表，首屏 chunk 不受影响。
+>
+> ⚠️ 文档正文必须用**动态 `import()`** 取（`import('../../tmp/x.md?raw')`）。改成顶部静态
+> import 会把整篇 md 塞进首屏，实测首屏 41.2 kB → 44.0 kB。
 >
 > `about` 栏目也不走这里，它直接读仓库的 `README.md`，同样是纯静态资源。
 

@@ -28,16 +28,17 @@ import { useConfig } from '../config'
 const { config } = useConfig()
 
 // 帖子数据暂时硬编码，后续接入真实数据源时替换这里即可。
-// ⚠️ 本地静态文档（`/document/:id`）已经取消，这条卡片改指 `/document` 说明页 ——
-// 它原本指向的 `/document/markdown-test` 现在没有对应路由，点了会白屏。
+// ⚠️ 这条卡片指向的是**本地静态文档** `/document/:id`（正文在 `tmp/markdown-test.md`），
+// 不是后端帖子 —— 后端帖子是两段地址 `/document/:userid/:postid`，需要真实 userid / postid。
+// 卡片刻意不带 `postId`：本地文档没有后端 id，带了会让统计栏显示三个 0 并发出无效请求。
 const posts = computed(() => [
   {
-    title: '文档栏目说明',
-    summary: '这个栏目怎么用、页面有哪些区域、当前接入了哪些接口。具体某篇帖子的地址是 /document/{userid}/{postid}。',
+    title: 'Markdown 渲染测试',
+    summary: '覆盖 h1–h6 标题、加粗斜体、行内代码与代码块、引用（含嵌套）、无序与有序列表、任务列表、表格、图片等全部文字样式的渲染用例。',
     author: 'Windy',
-    date: '2026-11-02',
-    tags: ['文档'],
-    to: '/document',
+    date: '2026-10-14',
+    tags: ['Markdown', 'Vue'],
+    to: '/document/markdown-test',
     // 暂时复用站点背景图作为封面。
     cover: config.backgroundImageUrl,
   },

@@ -36,13 +36,21 @@ const router = createRouter({
       path: '/community',
       component: () => import('../views/community.vue'),
     },
-    // 「文档」栏目：`/document` 是**说明页**（纯静态文案，不联网）；
-    // 具体一篇帖子是 `/document/:userid/:postid`，与后端 `GET /post/:userid/:postid` 的两段参数对齐。
-    // ⚠️ 本地静态文档（`/document/:id`）已经取消，栏目只展示后端帖子。
+    // 「文档」栏目有两条入口，靠**路径段数**区分，互不影响：
+    // - `/document`、`/document/:id`（零段 / 一段）→ 本地静态文档，正文是 `tmp/*.md`，不联网；
+    // - `/document/:userid/:postid`（两段）→ 后端帖子，与 `GET /post/:userid/:postid` 对齐。
+    //
+    // ⚠️ `/document` 不再 redirect 到 `/document/xxx`：默认 id 由页面自己兜底
+    // （`views/document-reader.vue`），路由表就不必 import 文档注册表，首屏 chunk 不受影响。
     {
       name: 'document',
       path: '/document',
-      component: () => import('../views/document-intro.vue'),
+      component: () => import('../views/document-reader.vue'),
+    },
+    {
+      name: 'document-by-id',
+      path: '/document/:id',
+      component: () => import('../views/document-reader.vue'),
     },
     {
       name: 'post',
