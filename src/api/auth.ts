@@ -56,7 +56,8 @@ export interface LoginResult {
  * @throws 状态码非 2xx、请求没能发出去，或响应里没有可用的 `token`。
  */
 export async function login(payload: LoginPayload): Promise<LoginResult> {
-  const result = await postJson<LoginResult>('/login', payload, { auth: false })
+  // 进度条：登录是明确要等的一步（还要连着问一次用户名），值得给反馈。
+  const result = await postJson<LoginResult>('/login', payload, { auth: false, progress: true })
   const token = typeof result?.token === 'string' ? result.token.trim() : ''
 
   if (token === '') {
@@ -93,7 +94,7 @@ export async function login(payload: LoginPayload): Promise<LoginResult> {
  * @throws 状态码非 2xx，或请求没能发出去（抛 `ApiError`）。
  */
 export function register(payload: RegisterPayload): Promise<void> {
-  return postJson<void>('/register', payload, { auth: false })
+  return postJson<void>('/register', payload, { auth: false, progress: true })
 }
 
 /**

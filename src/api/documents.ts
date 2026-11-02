@@ -1,54 +1,38 @@
 /**
- * 文档数据源。
+ * 「文档」栏目的说明页内容。
  *
- * `document` 栏目的正文后续会由**后端接口**提供，所以对外只暴露 Promise 化的
- * `fetchDocument(id)` —— 组件不关心数据从哪来。接入真实接口时只改本文件的函数体
- * （请求走通信层 `./http.ts`，不要自己拼 base url），调用方一行都不用动。
+ * ⚠️ 这个栏目**只展示后端帖子**（`/document/:userid/:postid`），不再有本地静态文档，
+ * 也不再按 id 去读 `tmp/*.md`。帖子数据源是 `src/api/posts.ts`。
  *
- * 目前数据来自下面的本地注册表，正文是 `tmp/` 下的静态 markdown。
- * 注意：`about` 栏目不走这里，它读的是仓库里的 README，纯静态资源。
+ * 说明页是纯静态文案，写在这里而不是页面组件里，方便和 `docs/api.md` 一起维护。
  */
 
-import markdownTestSource from '../../tmp/markdown-test.md?raw'
+/** 说明页的 Markdown 正文。 */
+export const documentIntroSource = `# 文档
 
-/** 一篇文档。 */
-export interface DocumentDetail {
-  /** 文档 id，与路由参数一致。 */
-  id: string
-  /** 文档标题。 */
-  title: string
-  /** Markdown 正文。 */
-  source: string
-}
+这里是站点的长文栏目：每篇帖子由「标题 + Markdown 正文」组成，正文支持标题、代码块、表格、引用、任务列表等常用语法。
 
-/** 访问 `/document`（不带 id）时默认打开的文档。 */
-export const defaultDocumentId = 'markdown-test'
+## 怎么打开一篇
 
-/** 接入后端前的本地文档注册表，key 就是路由里的 id。 */
-const localDocuments: Record<string, { title: string, source: string }> = {
-  'markdown-test': {
-    title: 'Markdown 渲染测试',
-    source: markdownTestSource,
-  },
-}
+帖子的地址是 \`/document/{userid}/{postid}\`：
 
-/**
- * 按 id 拉取文档正文。
- *
- * @param id 路由参数里的文档 id。
- * @throws 文档不存在时抛错，由调用方渲染错误态。
- */
-export async function fetchDocument(id: string): Promise<DocumentDetail> {
-  // 预留：接入后端后改为 `getJson<DocumentDetail>(`/documents/${encodeURIComponent(id)}`)`。
-  const document = localDocuments[id]
+- \`userid\` —— 作者的用户 id；
+- \`postid\` —— 帖子 id。
 
-  if (document === undefined) {
-    throw new Error(`没有找到文档「${id}」。`)
-  }
+例如 \`/document/10086/1\`。目前社区列表还没有对应的后端接口，所以暂时只能从地址栏直接打开，或者从别处复制链接进来。
 
-  return {
-    id,
-    title: document.title,
-    source: document.source,
-  }
-}
+## 页面上有什么
+
+| 区域 | 内容 |
+| --- | --- |
+| 标题区 | 标题、作者、最后更新时间 |
+| 正文 | Markdown 渲染 |
+| 操作条 | 点赞、收藏（需登录，计数即时更新） |
+| 评论区 | 一级评论 + 二级回复，可点赞、可删除自己的评论 |
+
+## 当前状态
+
+- 帖子详情、点赞、收藏、评论（含回复与删除）都已接上后端。
+- 点赞与收藏的「已赞」状态后端还没有查询接口，刷新后会回到未选中，但计数是准的。
+- 社区列表仍是本地数据，等后端补了列表接口再切过来。
+`

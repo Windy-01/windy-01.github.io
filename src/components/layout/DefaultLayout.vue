@@ -6,6 +6,8 @@
     </template>
 
     <Header />
+    <!-- 加载进度条：紧贴顶栏下沿，反映路由跳转与站内请求的进行状态 -->
+    <TopProgress />
 
     <div class="home-body">
       <div class="aside-slot" :class="{ 'is-collapsed': !asideExpanded }">
@@ -38,6 +40,7 @@ import Aside from './Aside.vue'
 import Background from './Background.vue'
 import Header from './Header.vue'
 import SettingsDialog from './SettingsDialog.vue'
+import TopProgress from './TopProgress.vue'
 import { useConfig } from '../../config'
 
 /**

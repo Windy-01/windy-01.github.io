@@ -23,7 +23,14 @@
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
   box-shadow: 0 16px 40px rgb(15 23 42 / 12%);
-  animation: layout-fade-in 0.8s ease-out 0.2s both;
+  /*
+   * 页面卡片的入场：短、无延迟、起始不完全透明（关键帧见 `globals.css`）。
+   *
+   * 以前这里是 `0.8s ease-out 0.2s both` —— 卡片是**每个页面各挂一份**的，
+   * 换页就会重建，于是每次跳转都要先空 0.2 秒再花 0.8 秒淡入，
+   * 整块内容消失一秒，看起来像卡住了。现在压到 0.24 秒且不延迟。
+   */
+  animation: layout-page-in 0.24s ease-out both;
 }
 
 @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
@@ -49,16 +56,7 @@
   margin: 0 auto;
 }
 
-@keyframes layout-fade-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
+/* 关键帧统一在 `globals.css`（`layout-page-in`），这里只留「减少动效」的兜底。 */
 @media (prefers-reduced-motion: reduce) {
   .layout-document-main {
     animation: none;

@@ -12,7 +12,9 @@
 | ------------- | --- | ------------------------ |
 | [认证](#认证)     | 3   | ✅ 已接入，真实发请求              |
 | [聊天](#聊天)     | 3   | ⏳ 只预留契约，当前返回空列表 / 未接入 |
-| [文档](#文档)     | 1   | ⏳ 只预留契约，当前读本地静态 markdown |
+| [文档](#文档)     | —   | ✅ 纯静态说明页，不请求接口        |
+| [帖子](#帖子)     | 8   | 🚧 已接入；后端 handler 仍是空壳，响应字段按宽容解析 |
+| [评论](#评论)     | 9   | 🚧 已接入；后端 handler 仍是空壳，响应字段按宽容解析 |
 | [用户](#用户)     | 9   | 🚧 资料 / 头像 / README / 用户名读取 / 按账号查 id 已接；`update/username` 请求体形状待对齐，`/users/me` 暂不需要 |
 | [帖子统计](#帖子统计) | —   | ❓ 尚未约定路径                 |
 
@@ -245,29 +247,151 @@ Agent 后端可以**独立于站内后端**，在 Agent 界面右上角的齿轮
 
 ## 文档
 
-`src/api/documents.ts` — ⏳ **只预留契约**，目前读本地注册表 + `tmp/` 下的静态 markdown。
+`src/api/documents.ts` — ✅ **纯静态，不请求任何接口**。
 
-> `about` 栏目**不走这个接口**，它直接读仓库里的 `README.md`，是纯静态资源。
+栏目现在只有两个页面：
 
-### `GET /documents/:id`
+| 路由 | 组件 | 内容 |
+| --- | --- | --- |
+| `/document` | `views/document-intro.vue` | 说明页，文案在 `documents.ts` 的 `documentIntroSource` |
+| `/document/:userid/:postid` | `views/document.vue` | 后端帖子详情，见下一节「帖子」 |
 
-按 id 拉取文档正文。
+> ⚠️ 本地静态文档（`/document/:id` + `tmp/*.md` 注册表）**已取消**：
+> `defaultDocumentId` / `fetchDocument()` / `DocumentDetail` 全部删除。
+>
+> `about` 栏目也不走这里，它直接读仓库的 `README.md`，同样是纯静态资源。
 
-**路径参数**
+---
 
-| 参数   | 说明                                                          |
-| ---- | ----------------------------------------------------------- |
-| `id` | 文档 id，与前端路由 `/document/:id` 的参数一致，前端会做 `encodeURIComponent` |
+## 帖子
 
-**响应体**：`DocumentDetail`
+`src/api/posts.ts` — 🚧 **已接入**，真实发请求（后端 windsharebase，`/api/post`）。
 
-| 字段       | 类型       | 说明            |
-| -------- | -------- | ------------- |
-| `id`     | `string` | 文档 id，与路由参数一致 |
-| `title`  | `string` | 文档标题          |
-| `source` | `string` | Markdown 正文   |
+界面：`/document/:userid/:postid` → `views/document.vue`，正文下方带点赞 / 收藏条与评论区。
 
-> 前端在文档不存在时渲染错误态，所以「找不到」应当返回非 2xx。
+### 响应信封
+
+后端统一用 Go 的 `response.Build{Message, Data}`，**结构体没写 json tag**，序列化出来是**大写**：
+
+```json
+{ "Message": "suceed", "Data": { ... } }
+```
+
+前端 `src/api/envelope.ts` 的 `unwrapEnvelope()` 大写小写都认，`Data` 里再套 `post` / `document` 也能摊平 ——
+后端补 tag 或改嵌套都不用动前端。
+
+### 接口一览
+
+| 方法       | 路径                                          | 说明                     |
+| -------- | ------------------------------------------- | ---------------------- |
+| `GET`    | `/post/:userid/:postid`                     | 查询帖子（正文 + 元信息 + 统计）    |
+| `GET`    | `/post/:userid/:postid/like`                | 点赞                     |
+| `GET`    | `/post/:userid/:postid/like/cancel`         | 取消点赞                   |
+| `GET`    | `/post/:userid/:postid/favorite`            | 收藏                     |
+| `GET`    | `/post/:userid/:postid/favorite/cancel`     | 取消收藏                   |
+| `POST`   | `/post/upload`                              | 发布帖子                   |
+| `PUT`    | `/post/:userid/:postid`                     | 编辑帖子                   |
+| `DELETE` | `/post/:userid/:postid`                     | 删除帖子                   |
+
+> ⚠️ 点赞 / 收藏 / 取消都是 `GET`（后端定的，不是笔误）。这类「用 GET 改状态」的请求会被浏览器缓存，
+> 前端统一带一个 `_t=<时间戳>` 查询参数破缓存。
+> ⚠️ 后端**没有**「帖子列表」接口，社区页的列表仍是本地数据。
+
+### `GET /post/:userid/:postid`
+
+**响应体**：`Data` 里是 `{ post: PostEntity, document: Document }`（摊平后解析）。
+
+| 字段（camel / snake 都认）              | 类型        | 说明                     |
+| -------------------------------- | --------- | ---------------------- |
+| `postid` / `postId`              | `number`  | 帖子 id                  |
+| `userid` / `userId`              | `number`  | 作者 userid              |
+| `author` / `username`            | `string`  | 作者显示名（`Document.author`） |
+| `title`                          | `string`  | 标题                     |
+| `mainText` / `main_text` / `content` | `string`  | Markdown 正文            |
+| `excerpt`                        | `string`  | 摘要；没给时前端从正文截取         |
+| `cover_image_ref` / `coverImageRef` | `string` | 封面引用                   |
+| `allow_comment` / `allowComment` | `boolean` | 是否允许评论，缺省按 `true`      |
+| `like_count` / `likeCount`       | `number`  | 点赞数                    |
+| `comment_count` / `commentCount` | `number`  | 评论数                    |
+| `favorite_count` / `favoriteCount` | `number` | 收藏数                    |
+| `created_at` / `createdAt`       | `string`  | ISO 时间                 |
+| `updated_at` / `updatedAt`       | `string`  | ISO 时间                 |
+
+> 找不到帖子请返回非 2xx：前端把 404 渲染成「没有找到这篇帖子。」，`status === 0` 渲染成「无法连接到服务器…」。
+
+### `POST /post/upload` / `PUT /post/:userid/:postid`
+
+**请求体**（两者同形，就是后端 `domain/post.Document` 那三个字段）：
+
+```json
+{ "author": "windyfront", "title": "标题", "mainText": "## Markdown 正文" }
+```
+
+> ⚠️ `author` 只是**显示名**；真正的作者 userid 由后端从令牌里取（发布接口的路径里没有 userid）。
+
+### 点赞 / 收藏 / 删除
+
+四个动作接口都只回 `{ "Message": "suceed" }`，**不带新计数**，所以界面上的 ±1 由前端本地算。
+`DELETE /post/:userid/:postid` 同样只回状态。
+
+---
+
+## 评论
+
+`src/api/comments.ts` — 🚧 **已接入**，真实发请求（`/api/comment`）。
+
+### 接口一览
+
+| 方法       | 路径                                        | 说明                |
+| -------- | ----------------------------------------- | ----------------- |
+| `GET`    | `/comment/:postid`                        | 帖子下所有**一级**评论     |
+| `GET`    | `/comment/:postid/:commentid`             | 单条评论              |
+| `GET`    | `/comment/:postid/:commentid/like`        | 点赞评论              |
+| `GET`    | `/comment/:postid/:commentid/like/cancel` | 取消点赞              |
+| `GET`    | `/comment/list/:commentid/replies`        | 某条评论的所有二级回复       |
+| `GET`    | `/comment/list/:commentid/thread`         | 二级评论所属的回复链        |
+| `POST`   | `/comment/reply/:postid`                  | 回复帖子（发一级评论）       |
+| `POST`   | `/comment/reply/:postid/:commentid`       | 回复评论（发二级评论）       |
+| `DELETE` | `/comment/:postid/:commentid`             | 删除评论              |
+
+> ⚠️ 前端路由匹配顺序：`/comment/list/...` 必须排在 `/comment/:postid` 之前，否则 `list` 会被当成 postid。
+
+### 评论字段
+
+| 字段（camel / snake 都认）                      | 类型        | 说明                        |
+| ---------------------------------------- | --------- | ------------------------- |
+| `comment_id` / `commentId`               | `number`  | 评论 id                     |
+| `postid` / `postId`                      | `number`  | 所属帖子                      |
+| `userid` / `userId`                      | `number`  | 作者 userid                 |
+| `content`                                | `string`  | 正文（保留换行）                  |
+| `created_at` / `createdAt`               | `string`  | ISO 时间                    |
+| `like_count` / `likeCount`               | `number`  | 点赞数                       |
+| `reply_count` / `replyCount`             | `number`  | 回复数                       |
+| `is_pinned` / `isPinned`                 | `boolean` | 是否置顶                      |
+| `parent_id` / `parentId`                 | `number`  | 直接父评论；一级评论为 `null`        |
+| `root_id` / `rootId`                     | `number`  | 所属根评论                     |
+| `reply_to_userid` / `replyToUserid`      | `number`  | 被回复者；`null` 表示直接回复帖子       |
+
+列表响应既可以是 `Data: [...]`，也可以是 `Data: { list: [...] }` / `{ comments: [...] }`，
+前端 `pickList()` 都会认。
+
+### `POST /comment/reply/:postid` 与 `/comment/reply/:postid/:commentid`
+
+**请求体**（两者同形，只有正文）：
+
+```json
+{ "content": "评论内容" }
+```
+
+> ⚠️ **层级不传**：`parent_id` / `root_id` / `reply_to_userid` 由后端按 `:commentid` 自己推导。
+> 回复评论时前端只把 `content` 发过去，不掺和层级。
+
+### 点赞 / 删除
+
+`GET .../like`、`GET .../like/cancel` 只回 `{ "Message": "suceed" }`，不带新计数；
+`DELETE /comment/:postid/:commentid` 同理。删除前界面会要求二次确认（按钮先变「确认删除」）。
+
+> ⚠️ 「我是否赞过」后端没有查询接口，前端只在本次会话内记状态，刷新即归零。
 
 ---
 

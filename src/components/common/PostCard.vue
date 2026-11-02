@@ -10,8 +10,9 @@
         <p v-if="summary" class="post-card__summary">{{ summary }}</p>
 
         <div class="post-card__footer">
-          <!-- 统计三项：浏览量 / 点赞 / 评论，位于标签左侧，用 | 分隔。 -->
-          <div class="post-card__stats">
+          <!-- 统计三项：浏览量 / 点赞 / 评论，位于标签左侧，用 | 分隔。
+               没有 postId 时不渲染（本地静态卡片没有统计数据，显示三个 0 反而误导）。 -->
+          <div v-if="postId !== ''" class="post-card__stats">
             <span class="post-card__stat" title="浏览量">
               <svg
                 class="post-card__stat-icon"

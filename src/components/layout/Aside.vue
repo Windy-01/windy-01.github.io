@@ -173,7 +173,7 @@ onUnmounted(() => {
   transition:
     flex-basis 0.25s ease,
     width 0.25s ease;
-  animation: layout-fade-in 0.7s ease-out 0.1s both;
+  animation: layout-fade-in 0.4s ease-out 0.04s both;
 }
 
 @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
@@ -422,16 +422,7 @@ onUnmounted(() => {
   color: #f8fafc;
 }
 
-@keyframes layout-fade-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
+/* 关键帧统一在 `globals.css`（`layout-fade-in`），这里只留「减少动效」的兜底。 */
 @media (prefers-reduced-motion: reduce) {
   .layout-aside {
     animation: none;

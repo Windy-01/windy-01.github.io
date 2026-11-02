@@ -31,6 +31,44 @@ body {
 }
 
 /*
+ * 布局入场动画的**唯一定义处**。
+ *
+ * 以前 `Header` / `Aside` / `DocumentMain` 三个组件各自抄了一份
+ * `@keyframes layout-fade-in`，时长还各不相同（0.6s / 0.7s+0.1s 延迟 /
+ * 0.8s+0.2s 延迟），三块内容各淡各的、节奏对不上。现在关键帧只在这里写一份，
+ * 组件里只引用名字，时长在各自的选择器上给出（那是各组件自己的观感）。
+ *
+ * ⚠️ Vue 的 scoped 样式只会重命名**同一 style 块内声明过**的关键帧；
+ * 引用这里声明的名字不会被改名，可以放心在组件里写 `animation: layout-fade-in …`。
+ *
+ * - `layout-fade-in`：纯淡入，给顶栏 / 侧栏这类「一直都在」的外壳用；
+ * - `layout-page-in`：淡入 + 轻微上浮，给随路由切换而重建的页面卡片用。
+ *   注意**起始透明度不是 0**（0.35 起步）：整块卡片从全透明淡入会有明显的
+ *   「先白一下再出现」，看起来像闪烁，而不是过渡。
+ */
+@keyframes layout-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes layout-page-in {
+  from {
+    opacity: 0.35;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
  * 全局滚动条样式。
  *
  * 这里是**唯一**的定义处 —— 组件内不要再单独写滚动条规则，

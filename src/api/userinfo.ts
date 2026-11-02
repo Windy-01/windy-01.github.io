@@ -161,7 +161,7 @@ export async function uploadAvatar(
   // 第三个参数给文件名：有些后端会按后缀判断类型，缺省时浏览器会填成 "blob"。
   form.append(avatarFormField, normalized, fileName)
 
-  return parseFileRef(await postForm<unknown>(avatarUploadPath, form))
+  return parseFileRef(await postForm<unknown>(avatarUploadPath, form, { progress: true }))
 }
 
 /**
@@ -178,7 +178,7 @@ export async function uploadReadme(source: string): Promise<FileRef | null> {
   const blob = new Blob([source], { type: 'text/markdown;charset=utf-8' })
   form.append(readmeFormField, blob, 'readme.md')
 
-  return parseFileRef(await postForm<unknown>(readmeUploadPath, form))
+  return parseFileRef(await postForm<unknown>(readmeUploadPath, form, { progress: true }))
 }
 
 /**
@@ -235,7 +235,7 @@ export async function uploadProfile(profile: UserProfile): Promise<void> {
     phone: profile.phone,
   }
 
-  await postJson<void>(profileUploadPath, payload)
+  await postJson<void>(profileUploadPath, payload, { progress: true })
 }
 
 /**
@@ -250,7 +250,7 @@ export async function uploadProfile(profile: UserProfile): Promise<void> {
  * （而且 Jackson 也可能直接 400）。所以这里走 `postText()`，body 就是名字本身。
  */
 export async function uploadUsername(name: string): Promise<void> {
-  await postText<void>(usernameUploadPath, name.trim())
+  await postText<void>(usernameUploadPath, name.trim(), { progress: true })
 }
 
 /**
@@ -375,7 +375,8 @@ export function normalizeProfile(raw: unknown, fallbackId: string): UserProfile 
  *         由调用方决定是回落默认资料还是渲染错误态。
  */
 export async function fetchRemoteProfile(userId: string): Promise<UserProfile> {
-  const raw = await getJson<unknown>(profilePathOf(userId))
+  // 进度条：主页整页内容都等这一趟。
+  const raw = await getJson<unknown>(profilePathOf(userId), { progress: true })
 
   return normalizeProfile(raw, userId)
 }
@@ -394,6 +395,10 @@ export async function fetchRemoteProfile(userId: string): Promise<UserProfile> {
  * 字段缺失 / 类型不对 / 非对象一律返回空串，界面回落到「未命名用户」。
  *
  * ⚠️ **用户名不随 `profile` 返回**，主页标题与顶栏都靠这一趟。
+ *
+ * ⚠️ **不推动进度条**（不传 `progress`）：这是渐进增强 —— 取不到就回落
+ * 「未命名用户」/账号，页面照常可用；而且评论区会**并发**给每个作者各查一次，
+ * 真让它们去点亮顶栏，评论一展开就会看到进度条疯狂闪。
  *
  * @throws 接口不可达 / 非 2xx 时抛 `ApiError`，由调用方决定是否忽略（取不到不算致命）。
  */
@@ -427,7 +432,8 @@ export async function fetchRemoteUserid(
   account: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const raw = await getJson<unknown>(useridPathOf(account), { signal })
+  // 进度条：打开主页的第一趟，后面 profile / username 都要等它，属于主体内容。
+  const raw = await getJson<unknown>(useridPathOf(account), { signal, progress: true })
 
   if (typeof raw === 'number' && Number.isFinite(raw)) {
     return String(raw)
@@ -456,7 +462,8 @@ export async function fetchRemoteUserid(
  * 签名链接过期（403）也会抛，调用方同样可以当作「这次读不到」。
  */
 export async function fetchRemoteReadme(userId: string, signal?: AbortSignal): Promise<string> {
-  const raw = await getJson<unknown>(readmePathOf(userId), { signal })
+  // 进度条：主页正文是页面主体。
+  const raw = await getJson<unknown>(readmePathOf(userId), { signal, progress: true })
   const ref = parseFileRef(raw)
 
   // 204 / 空响应 / 结构不对：当作空正文（用户把 README 清空了）。

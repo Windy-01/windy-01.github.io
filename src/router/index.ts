@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import { defaultDocumentId } from '../api/documents'
 import { isLoggedIn } from '../api/session'
+import { setNavigating } from '../utils/progress'
 
 /**
  * 页面组件一律用**动态 `import()`**：每个页面单独打成一个 chunk，
@@ -15,6 +15,16 @@ import { isLoggedIn } from '../api/session'
  */
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+  /**
+   * 换页一律回到顶部。
+   *
+   * 不做这件事时，浏览器会保留上一页的滚动位置：从一篇长帖子点进另一篇，
+   * 新页面直接停在中间，观感像是「没跳转」。返回上一步（浏览器前进后退）时
+   * 仍用 `savedPosition` 还原，这是 `scrollBehavior` 自带的默认行为。
+   */
+  scrollBehavior(to, from, savedPosition) {
+    return savedPosition ?? { top: 0 }
+  },
   routes: [
     {
       name: 'home',
@@ -26,15 +36,18 @@ const router = createRouter({
       path: '/community',
       component: () => import('../views/community.vue'),
     },
-    // 文档正文由路由参数指定；`/document` 不带 id 时跳到默认文档。
+    // 「文档」栏目：`/document` 是**说明页**（纯静态文案，不联网）；
+    // 具体一篇帖子是 `/document/:userid/:postid`，与后端 `GET /post/:userid/:postid` 的两段参数对齐。
+    // ⚠️ 本地静态文档（`/document/:id`）已经取消，栏目只展示后端帖子。
     {
       name: 'document',
-      path: '/document/:id',
-      component: () => import('../views/document.vue'),
+      path: '/document',
+      component: () => import('../views/document-intro.vue'),
     },
     {
-      path: '/document',
-      redirect: { name: 'document', params: { id: defaultDocumentId } },
+      name: 'post',
+      path: '/document/:userid/:postid',
+      component: () => import('../views/document.vue'),
     },
     // 关于页的内容是仓库里的 README，静态资源，不经过后端。
     {
@@ -76,6 +89,30 @@ const router = createRouter({
       component: () => import('../views/logout.vue'),
     },
   ],
+})
+
+/**
+ * 进度条：跳转开始 → 结束。
+ *
+ * 放在登录守卫**之前**注册：`beforeEach` 按注册顺序执行，先点亮进度条再判断权限，
+ * 这样被重定向的跳转也有反馈。重定向时 `beforeEach` 会再跑一遍，
+ * `setNavigating(true)` 是幂等的，不会重复计数。
+ *
+ * ⚠️ 结束信号要接 `afterEach` 和 `onError` 两处：跳转失败（chunk 下载不到、
+ * 守卫抛错）不会走 `afterEach`，只接那一处会让进度条一直挂在顶上。
+ */
+router.beforeEach(() => {
+  setNavigating(true)
+
+  return true
+})
+
+router.afterEach(() => {
+  setNavigating(false)
+})
+
+router.onError(() => {
+  setNavigating(false)
 })
 
 /**

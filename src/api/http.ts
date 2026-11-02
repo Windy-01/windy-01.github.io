@@ -1,18 +1,21 @@
 /**
  * 外部接口通信层 —— 站内**唯一的网络出口**。
  *
- * 所有自有后端请求都必须经过这里，好处是四件事只在一处做：
+ * 所有自有后端请求都必须经过这里，好处是五件事只在一处做：
  * 1. 拼地址：统一以设置 → 网络里的「API Base URL」（`config.apiBaseUrl`）为前缀，
  *    由 `normalizeApiBaseUrl()` 规整；**留空或格式错误都回落到「与站点同源」的相对路径**；
  * 2. 鉴权：已登录时自动带上 `Authorization: Bearer <token>`（见 `./session.ts`）；
  * 3. 编解码：请求体自动 JSON 序列化（`FormData` 例外，见 `postForm()`），响应体自动按 JSON 解析；
- * 4. 错误：非 2xx 与「请求根本没发出去」都统一转成 `ApiError`。
+ * 4. 错误：非 2xx 与「请求根本没发出去」都统一转成 `ApiError`；
+ * 5. 进度：显式标了 `progress: true` 的请求（页面主体内容 / 写操作）进出各上报一次
+ *    给顶栏下方的加载进度条（见 `../utils/progress`）。
  *
  * 业务模块（如 `./auth.ts`）只描述「请求哪个路径、带什么参数、返回什么类型」，
  * 不要自己调 `fetch`，也不要自己拼 base url、自己写 `Authorization`。
  */
 
 import { normalizeApiBaseUrl, useConfig } from '../config'
+import { beginRequest, endRequest } from '../utils/progress'
 import { clearIdentity } from './identity'
 import { clearSession, getAuthorizationHeader } from './session'
 
@@ -72,6 +75,21 @@ export interface RequestOptions {
    * 不传时仍走 `config.apiBaseUrl`；**业务路径照旧不带 `/api`**。
    */
   baseUrl?: string
+  /**
+   * 是否让这次请求推动顶栏下方的加载进度条。**默认 `false`**。
+   *
+   * 只给「影响页面主体内容」的请求打开：帖子详情、评论列表、用户资料 / 正文、
+   * 以及所有写操作（发帖、改帖、发评论、保存资料、登录注册…）。
+   *
+   * ⚠️ **点赞 / 收藏 / 取消、补作者名、Agent 对话一律不开**：
+   * - 点赞收藏的结果本地已经先 ±1 了，等后端纯属后台同步，进度条亮一下反而像出错；
+   * - 补作者名是渐进增强（取不到就回落「用户 {userid}」），而且评论区会并发好几个；
+   * - Agent 对话自己有打字指示。
+   *
+   * 默认关而不是默认开，是为了**以后新加的接口不会莫名亮进度条**：
+   * 要亮就得有人显式说「这条重要」。
+   */
+  progress?: boolean
 }
 
 /** 拼出最终请求地址：base url 无指定或格式错误时，回落到同源相对路径。 */
@@ -165,8 +183,31 @@ async function readBody(response: Response): Promise<unknown> {
  * - `2xx`：返回响应体；后端只返回状态码（空响应 / 204）时为 `undefined`。
  * - 其它状态码：抛 `ApiError`，`status` 是 HTTP 状态码。
  * - 请求没能发出（断网 / 服务未启动）：抛 `ApiError`，`status` 为 `0`。
+ *
+ * 这一层同时负责向顶部进度条上报「有请求在飞」（`../utils/progress`）。
+ * 上报包在**最外层**并配 `finally`，所以成功、失败、被取消都会收尾，
+ * 不会有请求把进度条永久卡在顶上。
+ *
+ * ⚠️ **只有显式 `progress: true` 的请求才上报**（见 `RequestOptions.progress`）：
+ * 进度条只反映「页面主体内容在等后端」，不反映点赞这类后台同步。
  */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  // 不推动进度条的请求直接走实现体，连计数都不碰 —— 少一层 try/finally 也少一分开销。
+  if (options.progress !== true) {
+    return sendRequest<T>(path, options)
+  }
+
+  beginRequest()
+
+  try {
+    return await sendRequest<T>(path, options)
+  } finally {
+    endRequest()
+  }
+}
+
+/** `request()` 的实现体：只管发请求与解析，不关心进度上报。 */
+async function sendRequest<T>(path: string, options: RequestOptions): Promise<T> {
   const { method = 'GET', body, textBody, query, signal, auth = true, baseUrl } = options
   const headers: Record<string, string> = { Accept: 'application/json' }
   let payload: BodyInit | undefined
@@ -267,4 +308,25 @@ export function postForm<T>(
   options: Omit<RequestOptions, 'method' | 'body'> = {},
 ): Promise<T> {
   return request<T>(path, { ...options, method: 'POST', body: form })
+}
+
+/** PUT 请求，`body` 会被 JSON 序列化。 */
+export function putJson<T>(
+  path: string,
+  body?: unknown,
+  options: Omit<RequestOptions, 'method' | 'body' | 'textBody'> = {},
+): Promise<T> {
+  return request<T>(path, { ...options, method: 'PUT', body })
+}
+
+/**
+ * DELETE 请求。
+ *
+ * 大多数后端不需要 body，所以默认不传；需要时用 `options.body` 显式给。
+ */
+export function deleteJson<T>(
+  path: string,
+  options: Omit<RequestOptions, 'method'> = {},
+): Promise<T> {
+  return request<T>(path, { ...options, method: 'DELETE' })
 }
